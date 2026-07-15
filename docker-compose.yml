@@ -10,8 +10,9 @@ services:
       - /data/cam-pi:/data/cam-pi
       - ./config:/app/config:ro
     devices:
-      - /dev/video0:/dev/video0    # USB camera fallback
-      - /dev/gpiomem:/dev/gpiomem  # GPIO access
+      - /dev/video0:/dev/video0
+      - /dev/gpiochip0:/dev/gpiochip0
+      - /dev/gpiomem0:/dev/gpiomem0
     privileged: false
     cap_add:
       - SYS_RAWIO
