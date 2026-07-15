@@ -11,9 +11,10 @@ services:
       - ./config:/app/config:ro
     devices:
       - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
       - /dev/gpiochip0:/dev/gpiochip0
       - /dev/gpiomem0:/dev/gpiomem0
-    privileged: false
+    privileged: true
     cap_add:
       - SYS_RAWIO
     environment:

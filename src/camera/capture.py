@@ -49,7 +49,13 @@ class CameraStream:
 
         source = self.url
         if source.isdigit():
-            self._cap = cv2.VideoCapture(int(source))
+            self._cap = cv2.VideoCapture(int(source), cv2.CAP_V4L2)
+            self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+            self._cap.set(cv2.CAP_PROP_FPS, self.fps)
+        elif source.startswith("/dev/"):
+            self._cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
             self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
             self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
             self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
