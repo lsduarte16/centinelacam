@@ -25,8 +25,7 @@ RUN pip install --no-cache-dir -e ".[gpio]" 2>/dev/null || pip install --no-cach
 
 COPY . .
 
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" && \
-    mv yolov8n.pt /app/yolov8n.pt
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 
 EXPOSE 8000
 
