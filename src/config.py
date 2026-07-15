@@ -56,6 +56,7 @@ class ZonesConfig(BaseModel):
     exit: list[int] = [700, 200, 1200, 500]
     active: list[int] = [100, 100, 1180, 620]
     safe_zone: list[int] = [400, 200, 880, 520]
+    paper_roi: list[int] = [0, 0, 1280, 720]
 
 
 class UseCaseConfig(BaseModel):
@@ -71,6 +72,7 @@ class UseCaseConfig(BaseModel):
     scan_region: list[int] = [200, 150, 1080, 570]
     motion_threshold: int = 5000
     alert_after_seconds: int = 3
+    min_object_area: int = 1200
     events: list[str] = []
 
 

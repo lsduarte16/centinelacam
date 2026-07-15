@@ -116,13 +116,15 @@ use_cases:
 
   zone_violation:
     description: "Alerta cuando un objeto sale de la zona permitida"
-    classes: [0, 39, 67, 73, 77, 78]  # persona, botella, celular, libro, peluche, oso
+    classes: [0, 39, 67, 73, 77, 78]
     fps: 10
     skip_frames: 2
+    min_object_area: 1200  # area minima en px para considerar un objeto (filtra ruido)
     zones:
-      # Zona segura (la "casa") - ajustar según posición de la hoja en cámara
-      # Formato: [x1, y1, x2, y2] en pixeles (resolución 1280x720)
-      safe_zone: [400, 200, 880, 520]
+      # ROI del papel (solo detectar dentro de esta area)
+      paper_roi: [130, 60, 950, 570]
+      # Zona segura (la "casa") - donde la figura debe estar
+      safe_zone: [340, 180, 740, 500]
     events:
       - zone_violation
 

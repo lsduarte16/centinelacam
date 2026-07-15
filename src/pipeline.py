@@ -270,31 +270,34 @@ class Pipeline:
 
         Uses HSV saturation channel to find colored objects (high saturation)
         while ignoring black pen lines (zero saturation) and white paper.
+        Only searches within the paper_roi to avoid false positives from background.
         """
         safe = self.uc_config.zones.safe_zone
         sx1, sy1, sx2, sy2 = safe
+        roi = self.uc_config.zones.paper_roi
+        rx1, ry1, rx2, ry2 = roi
 
-        h, w = frame.shape[:2]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         saturation = hsv[:, :, 1]
 
-        # High saturation = colored object (Stitch is blue = high saturation)
-        # Black pen lines and white paper both have LOW saturation
-        _, sat_mask = cv2.threshold(saturation, 60, 255, cv2.THRESH_BINARY)
+        # Only look within the paper ROI
+        roi_mask = np.zeros(saturation.shape, dtype=np.uint8)
+        roi_mask[ry1:ry2, rx1:rx2] = 255
 
-        # Clean up noise
+        _, sat_mask = cv2.threshold(saturation, 60, 255, cv2.THRESH_BINARY)
+        sat_mask = cv2.bitwise_and(sat_mask, roi_mask)
+
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         sat_mask = cv2.morphologyEx(sat_mask, cv2.MORPH_OPEN, kernel)
         sat_mask = cv2.morphologyEx(sat_mask, cv2.MORPH_CLOSE, kernel)
 
-        # Find all colored objects in the full frame
         contours, _ = cv2.findContours(
             sat_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
-        min_area = 500
+        min_area = self.uc_config.min_object_area
         now = time.time()
-        self._zone_detections = []  # store for video overlay
+        self._zone_detections = []
 
         for cnt in contours:
             area = cv2.contourArea(cnt)

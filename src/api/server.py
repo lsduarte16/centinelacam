@@ -199,17 +199,22 @@ def _annotate_frame(frame: np.ndarray, detector, gate_controller, pipeline=None)
     uc = settings.active_use_case
 
     if settings.use_case == "zone_violation":
+        # Paper ROI (area de búsqueda)
+        roi = uc.zones.paper_roi
+        cv2.rectangle(frame, (roi[0], roi[1]), (roi[2], roi[3]), (200, 200, 200), 1)
+
+        # Safe zone (la casa)
         sz = uc.zones.safe_zone
         cv2.rectangle(frame, (sz[0], sz[1]), (sz[2], sz[3]), (0, 255, 0), 2)
         cv2.putText(frame, "ZONA SEGURA", (sz[0] + 5, sz[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-        # Draw bounding boxes from contour-based detection
+        # Bounding boxes from contour-based detection
         if pipeline and hasattr(pipeline, "_zone_detections"):
             for (x, y, bw, bh, inside) in pipeline._zone_detections:
                 color = (0, 255, 0) if inside else (0, 0, 255)
-                label = "OK" if inside else "FUERA!"
-                cv2.rectangle(frame, (x, y), (x + bw, y + bh), color, 2)
-                cv2.putText(frame, label, (x, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                label = "DENTRO" if inside else "FUERA!"
+                cv2.rectangle(frame, (x, y), (x + bw, y + bh), color, 3)
+                cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
     else:
         if detector:
             result = detector.detect(frame)
