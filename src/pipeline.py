@@ -289,7 +289,7 @@ class Pipeline:
                         description=f"{det.class_name} fuera de zona segura",
                         track_id=det.track_id,
                         frame_id=frame_count,
-                        metadata={"cx": cx, "cy": cy, "class": det.class_name},
+                        metadata={"cx": int(cx), "cy": int(cy), "class": det.class_name},
                     )
                 )
 
