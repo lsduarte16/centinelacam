@@ -94,7 +94,7 @@ class Pipeline:
 
         self.camera.start()
 
-        api_app = create_app(db=self.db, gate_controller=self.gate)
+        api_app = create_app(db=self.db, gate_controller=self.gate, camera=self.camera, detector=self.detector)
         api_thread = Thread(
             target=uvicorn.run,
             args=(api_app,),

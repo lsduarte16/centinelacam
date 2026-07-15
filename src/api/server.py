@@ -1,10 +1,13 @@
 """FastAPI server for monitoring and control."""
 
+import time
 from datetime import datetime, timedelta
 
+import cv2
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from src.config import settings
@@ -16,7 +19,7 @@ class GateCommand(BaseModel):
     reason: str = ""
 
 
-def create_app(db: EventDatabase | None = None, gate_controller=None) -> FastAPI:
+def create_app(db: EventDatabase | None = None, gate_controller=None, camera=None, detector=None) -> FastAPI:
     app = FastAPI(
         title="CAM-PI Gate Controller",
         description="Edge AI gate control system for loading docks",
@@ -40,6 +43,7 @@ def create_app(db: EventDatabase | None = None, gate_controller=None) -> FastAPI
             "status": "ok",
             "timestamp": datetime.now().isoformat(),
             "gate_open": gate_controller.is_open if gate_controller else None,
+            "camera_connected": camera.frame is not None if camera else False,
         }
 
     @app.get("/events")
@@ -81,4 +85,138 @@ def create_app(db: EventDatabase | None = None, gate_controller=None) -> FastAPI
             "gate_open": gate_controller.is_open if gate_controller else None,
         }
 
+    @app.get("/video")
+    async def video_feed():
+        """MJPEG stream with detection overlays."""
+        if not camera:
+            raise HTTPException(503, "Camera not available")
+        return StreamingResponse(
+            _generate_frames(camera, detector, gate_controller),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    @app.get("/snapshot")
+    async def snapshot():
+        """Single JPEG frame with detections."""
+        if not camera or camera.frame is None:
+            raise HTTPException(503, "No frame available")
+        frame = _annotate_frame(camera.frame.copy(), detector, gate_controller)
+        _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return StreamingResponse(
+            iter([jpeg.tobytes()]),
+            media_type="image/jpeg",
+        )
+
+    @app.get("/", response_class=HTMLResponse)
+    async def dashboard():
+        """Simple live dashboard."""
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>CentinelaCam - Live View</title>
+            <style>
+                body { margin:0; background:#1a1a2e; color:#eee; font-family:system-ui; }
+                .container { max-width:1200px; margin:0 auto; padding:20px; }
+                h1 { color:#f5a623; margin-bottom:5px; }
+                .subtitle { color:#888; margin-bottom:20px; }
+                .video-box { background:#000; border-radius:8px; overflow:hidden; margin-bottom:20px; }
+                .video-box img { width:100%; display:block; }
+                .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+                .stat-card { background:#16213e; padding:16px; border-radius:8px; text-align:center; }
+                .stat-value { font-size:2em; font-weight:bold; color:#f5a623; }
+                .stat-label { color:#888; font-size:0.85em; margin-top:4px; }
+                .status { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
+                .status.on { background:#4caf50; }
+                .status.off { background:#f44336; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>CentinelaCam</h1>
+                <p class="subtitle">Control de Compuerta - Vision en Tiempo Real</p>
+                <div class="video-box">
+                    <img src="/video" alt="Live Feed">
+                </div>
+                <div class="stats" id="stats"></div>
+            </div>
+            <script>
+                async function updateStats() {
+                    try {
+                        const r = await fetch('/stats');
+                        const d = await r.json();
+                        const t = d.today || {};
+                        document.getElementById('stats').innerHTML = `
+                            <div class="stat-card">
+                                <div class="stat-value">${t.total_person_in || 0}</div>
+                                <div class="stat-label">Personas Entrada</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">${t.total_person_out || 0}</div>
+                                <div class="stat-label">Personas Salida</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">${t.total_vehicle_in || 0}</div>
+                                <div class="stat-label">Vehiculos Entrada</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value">${t.total_vehicle_out || 0}</div>
+                                <div class="stat-label">Vehiculos Salida</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value"><span class="status ${d.gate_open?'on':'off'}"></span>${d.gate_open?'ABIERTA':'CERRADA'}</div>
+                                <div class="stat-label">Compuerta</div>
+                            </div>
+                        `;
+                    } catch(e) {}
+                }
+                updateStats();
+                setInterval(updateStats, 3000);
+            </script>
+        </body>
+        </html>
+        """
+
     return app
+
+
+def _generate_frames(camera, detector, gate_controller):
+    """Generate MJPEG frames with detection overlays."""
+    while True:
+        frame = camera.frame
+        if frame is None:
+            time.sleep(0.1)
+            continue
+
+        annotated = _annotate_frame(frame.copy(), detector, gate_controller)
+        _, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+        time.sleep(0.1)
+
+
+def _annotate_frame(frame: np.ndarray, detector, gate_controller) -> np.ndarray:
+    """Draw detections, zones, and status on frame."""
+    if detector:
+        result = detector.detect(frame)
+        for det in result.detections:
+            x1, y1, x2, y2 = det.bbox
+            color = (0, 255, 0) if det.class_id == 0 else (0, 200, 255)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            label = f"{det.class_name} {det.confidence:.0%}"
+            if det.track_id:
+                label += f" #{det.track_id}"
+            cv2.putText(frame, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+    entry_zone = settings.gate.zones.entry
+    exit_zone = settings.gate.zones.exit
+    cv2.rectangle(frame, (entry_zone[0], entry_zone[1]), (entry_zone[2], entry_zone[3]), (255, 200, 0), 2)
+    cv2.putText(frame, "ENTRADA", (entry_zone[0] + 5, entry_zone[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 0), 2)
+    cv2.rectangle(frame, (exit_zone[0], exit_zone[1]), (exit_zone[2], exit_zone[3]), (0, 150, 255), 2)
+    cv2.putText(frame, "SALIDA", (exit_zone[0] + 5, exit_zone[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 150, 255), 2)
+
+    gate_status = "ABIERTA" if (gate_controller and gate_controller.is_open) else "CERRADA"
+    gate_color = (0, 255, 0) if (gate_controller and gate_controller.is_open) else (0, 0, 255)
+    cv2.putText(frame, f"COMPUERTA: {gate_status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, gate_color, 2)
+    cv2.putText(frame, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+    return frame
