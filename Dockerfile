@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[gpio]" 2>/dev/null || pip install --no-cache-dir -e .
+RUN pip install --upgrade pip setuptools && \
+    pip install --no-cache-dir -e ".[gpio]" 2>/dev/null || pip install --no-cache-dir -e .
 
 COPY . .
 
