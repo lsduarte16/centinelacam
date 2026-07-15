@@ -16,9 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY pyproject.toml .
+# Install PyTorch CPU-only first (avoids downloading ~2GB of CUDA libs)
 RUN pip install --upgrade pip setuptools && \
-    pip install --no-cache-dir -e ".[gpio]" 2>/dev/null || pip install --no-cache-dir -e .
+    pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e ".[gpio]" 2>/dev/null || pip install --no-cache-dir -e .
 
 COPY . .
 
