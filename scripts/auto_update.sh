@@ -30,7 +30,7 @@ trap 'rm -f "$LOCK_FILE"' EXIT
 if [ ! -d "$REPO_DIR/.git" ]; then
     log "Cloning repository..."
     git clone --depth 1 --branch "$BRANCH" \
-        "https://github.com/${GITHUB_REPO:-usuario/cam-pi}.git" "$REPO_DIR"
+        "https://github.com/${GITHUB_REPO:-lsduarte16/centinelacam}.git" "$REPO_DIR"
     cd "$REPO_DIR"
     docker compose -f "$COMPOSE_FILE" up -d --build
     log "Initial deployment complete"

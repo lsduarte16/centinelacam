@@ -45,7 +45,7 @@ REPO_DIR="/opt/cam-pi"
 if [ ! -d "$REPO_DIR" ]; then
     sudo mkdir -p "$REPO_DIR"
     sudo chown "$USER:$USER" "$REPO_DIR"
-    git clone --depth 1 https://github.com/${GITHUB_REPO:-usuario/cam-pi}.git "$REPO_DIR"
+    git clone --depth 1 https://github.com/${GITHUB_REPO:-lsduarte16/centinelacam}.git "$REPO_DIR"
 fi
 
 # Setup auto-update systemd timer
@@ -60,7 +60,7 @@ Type=oneshot
 User=pi
 WorkingDirectory=/opt/cam-pi
 ExecStart=/opt/cam-pi/scripts/auto_update.sh
-Environment=GITHUB_REPO=usuario/cam-pi
+Environment=GITHUB_REPO=lsduarte16/centinelacam
 EOF
 
 sudo tee /etc/systemd/system/cam-pi-update.timer > /dev/null <<'EOF'

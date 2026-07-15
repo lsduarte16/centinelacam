@@ -67,7 +67,7 @@ Procesamiento 100% en el edge con Raspberry Pi 5, cámara domo y modelos de IA l
 ssh pi@<IP_RASPBERRY>
 
 # Ejecutar script de setup
-curl -fsSL https://raw.githubusercontent.com/<tu-usuario>/cam-pi/main/scripts/setup_raspberry.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lsduarte16/centinelacam/main/scripts/setup_raspberry.sh | bash
 ```
 
 ### 2. Configurar cámara
@@ -103,8 +103,8 @@ sudo systemctl status cam-pi
 
 ```bash
 # Clonar
-git clone https://github.com/<tu-usuario>/cam-pi.git
-cd cam-pi
+git clone https://github.com/lsduarte16/centinelacam.git
+cd centinelacam
 
 # Crear entorno virtual
 python -m venv .venv
