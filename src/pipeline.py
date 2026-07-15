@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from threading import Thread
 
+import cv2
+import numpy as np
 import uvicorn
 
 from src.api.server import create_app
@@ -39,6 +41,8 @@ class Pipeline:
         self.cloud = CloudSync()
         self.telegram = TelegramNotifier()
         self._running = False
+        self._last_violation_time = 0.0
+        self._violation_cooldown = 10.0  # seconds between notifications
 
     def initialize(self):
         """Initialize all components based on active use case."""
@@ -260,38 +264,75 @@ class Pipeline:
                     )
 
     def _process_zone_violation(self, frame, frame_count):
-        """Zone violation: alert when object is detected OUTSIDE the safe zone."""
-        result = self.detector.detect(frame)
+        """Zone violation: detect colored objects on white paper outside safe zone.
+
+        Uses contour detection on the paper area instead of YOLO,
+        since small figurines aren't in COCO classes.
+        """
         safe = self.uc_config.zones.safe_zone
         sx1, sy1, sx2, sy2 = safe
 
-        for det in result.detections:
-            cx, cy = det.center
-            inside = sx1 <= cx <= sx2 and sy1 <= cy <= sy2
+        h, w = frame.shape[:2]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (11, 11), 0)
 
-            if not inside:
-                logger.info(
-                    "ZONE VIOLATION: %s at (%d,%d) outside safe zone",
-                    det.class_name, cx, cy,
+        # Threshold: white paper is bright (>200), objects are darker
+        _, thresh = cv2.threshold(blurred, 180, 255, cv2.THRESH_BINARY_INV)
+
+        # Mask out the safe zone so we only detect OUTSIDE it
+        mask = np.zeros_like(thresh)
+        # Define detection region (the paper area, roughly)
+        paper_margin = 30
+        mask[paper_margin:h - paper_margin, paper_margin:w - paper_margin] = 255
+        # Black out the safe zone in the mask
+        mask[sy1:sy2, sx1:sx2] = 0
+
+        # Apply mask: only look for objects outside safe zone
+        detection_area = cv2.bitwise_and(thresh, mask)
+
+        # Find contours of objects
+        contours, _ = cv2.findContours(
+            detection_area, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        min_area = 800  # ignore tiny noise
+        now = time.time()
+
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < min_area:
+                continue
+
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            cx, cy = x + bw // 2, y + bh // 2
+
+            if now - self._last_violation_time < self._violation_cooldown:
+                break
+
+            self._last_violation_time = now
+            logger.info(
+                "ZONE VIOLATION: object at (%d,%d) area=%d outside safe zone",
+                cx, cy, area,
+            )
+            self.telegram.notify(
+                event_type="zone_violation",
+                message=(
+                    f"Objeto detectado FUERA de la zona segura "
+                    f"(posición: {cx},{cy}, área: {area}px)"
+                ),
+                frame=frame,
+            )
+            self.db.insert_event(
+                GateEvent(
+                    event_type=EventType.ANOMALY_DETECTED,
+                    severity=Severity.HIGH,
+                    description="Objeto fuera de zona segura",
+                    track_id=0,
+                    frame_id=frame_count,
+                    metadata={"cx": cx, "cy": cy, "area": area},
                 )
-                self.telegram.notify(
-                    event_type="zone_violation",
-                    message=(
-                        f"{det.class_name} detectado FUERA de la zona segura "
-                        f"(posición: {cx},{cy})"
-                    ),
-                    frame=frame,
-                )
-                self.db.insert_event(
-                    GateEvent(
-                        event_type=EventType.ANOMALY_DETECTED,
-                        severity=Severity.HIGH,
-                        description=f"{det.class_name} fuera de zona segura",
-                        track_id=det.track_id,
-                        frame_id=frame_count,
-                        metadata={"cx": int(cx), "cy": int(cy), "class": det.class_name},
-                    )
-                )
+            )
+            break
 
     def _signal_handler(self, signum, frame):
         logger.info("Shutdown signal received")
