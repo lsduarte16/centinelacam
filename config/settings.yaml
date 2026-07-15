@@ -3,7 +3,9 @@
 # =============================================================================
 
 camera:
-  rtsp_url: "rtsp://admin:password@192.168.1.100:554/stream1"
+  # Para USB usar device index (0) o ruta (/dev/video0)
+  # Para IP usar rtsp_url: "rtsp://admin:password@192.168.1.100:554/stream1"
+  rtsp_url: "0"
   fps: 15
   resolution: [1280, 720]
   reconnect_delay: 5

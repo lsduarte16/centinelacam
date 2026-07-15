@@ -43,18 +43,27 @@ class CameraStream:
         logger.info("Camera stream stopped")
 
     def _connect(self) -> bool:
-        """Establish connection to camera."""
+        """Establish connection to camera (USB index or RTSP URL)."""
         if self._cap:
             self._cap.release()
 
-        self._cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+        source = self.url
+        if source.isdigit():
+            self._cap = cv2.VideoCapture(int(source))
+            self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+            self._cap.set(cv2.CAP_PROP_FPS, self.fps)
+        else:
+            self._cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+
         self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         if not self._cap.isOpened():
-            logger.warning("Failed to connect to camera: %s", self.url)
+            logger.warning("Failed to connect to camera: %s", source)
             return False
 
-        logger.info("Connected to camera: %s", self.url)
+        logger.info("Connected to camera: %s", source)
         return True
 
     def _capture_loop(self):
