@@ -208,12 +208,17 @@ def _annotate_frame(frame: np.ndarray, detector, gate_controller) -> np.ndarray:
             cv2.putText(frame, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
     uc = settings.active_use_case
-    entry_zone = uc.zones.entry
-    exit_zone = uc.zones.exit
-    cv2.rectangle(frame, (entry_zone[0], entry_zone[1]), (entry_zone[2], entry_zone[3]), (255, 200, 0), 2)
-    cv2.putText(frame, "ENTRADA", (entry_zone[0] + 5, entry_zone[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 0), 2)
-    cv2.rectangle(frame, (exit_zone[0], exit_zone[1]), (exit_zone[2], exit_zone[3]), (0, 150, 255), 2)
-    cv2.putText(frame, "SALIDA", (exit_zone[0] + 5, exit_zone[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 150, 255), 2)
+    if settings.use_case == "zone_violation":
+        sz = uc.zones.safe_zone
+        cv2.rectangle(frame, (sz[0], sz[1]), (sz[2], sz[3]), (0, 255, 0), 2)
+        cv2.putText(frame, "ZONA SEGURA", (sz[0] + 5, sz[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    else:
+        entry_zone = uc.zones.entry
+        exit_zone = uc.zones.exit
+        cv2.rectangle(frame, (entry_zone[0], entry_zone[1]), (entry_zone[2], entry_zone[3]), (255, 200, 0), 2)
+        cv2.putText(frame, "ENTRADA", (entry_zone[0] + 5, entry_zone[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 0), 2)
+        cv2.rectangle(frame, (exit_zone[0], exit_zone[1]), (exit_zone[2], exit_zone[3]), (0, 150, 255), 2)
+        cv2.putText(frame, "SALIDA", (exit_zone[0] + 5, exit_zone[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 150, 255), 2)
 
     gate_status = "ABIERTA" if (gate_controller and gate_controller.is_open) else "CERRADA"
     gate_color = (0, 255, 0) if (gate_controller and gate_controller.is_open) else (0, 0, 255)

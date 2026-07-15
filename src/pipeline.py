@@ -15,6 +15,7 @@ from src.camera.capture import CameraStream
 from src.config import settings
 from src.detector.yolo_detector import YOLODetector
 from src.gate_logic.controller import GateController
+from src.gate_logic.events import EventType, GateEvent, Severity
 from src.llm_engine.analyzer import LLMAnalyzer
 from src.notifications.telegram import TelegramNotifier
 from src.storage.database import EventDatabase
@@ -186,6 +187,8 @@ class Pipeline:
                 self._process_barcode(frame, frame_count)
             elif self.use_case == "sorter_monitor":
                 self._process_sorter(frame, frame_count)
+            elif self.use_case == "zone_violation":
+                self._process_zone_violation(frame, frame_count)
 
             elapsed = time.time() - start
             sleep_time = max(0, frame_interval - elapsed)
@@ -255,6 +258,40 @@ class Pipeline:
                         message=event.description,
                         frame=frame,
                     )
+
+    def _process_zone_violation(self, frame, frame_count):
+        """Zone violation: alert when object is detected OUTSIDE the safe zone."""
+        result = self.detector.detect(frame)
+        safe = self.uc_config.zones.safe_zone
+        sx1, sy1, sx2, sy2 = safe
+
+        for det in result.detections:
+            cx, cy = det.center
+            inside = sx1 <= cx <= sx2 and sy1 <= cy <= sy2
+
+            if not inside:
+                logger.info(
+                    "ZONE VIOLATION: %s at (%d,%d) outside safe zone",
+                    det.class_name, cx, cy,
+                )
+                self.telegram.notify(
+                    event_type="zone_violation",
+                    message=(
+                        f"{det.class_name} detectado FUERA de la zona segura "
+                        f"(posición: {cx},{cy})"
+                    ),
+                    frame=frame,
+                )
+                self.db.insert_event(
+                    GateEvent(
+                        event_type=EventType.ANOMALY_DETECTED,
+                        severity=Severity.HIGH,
+                        description=f"{det.class_name} fuera de zona segura",
+                        track_id=det.track_id,
+                        frame_id=frame_count,
+                        metadata={"cx": cx, "cy": cy, "class": det.class_name},
+                    )
+                )
 
     def _signal_handler(self, signum, frame):
         logger.info("Shutdown signal received")
