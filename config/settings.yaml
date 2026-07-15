@@ -30,7 +30,7 @@ gate:
 llm:
   provider: "ollama"
   model: "tinyllama"           # lightweight model for RPi5
-  base_url: "http://localhost:11434"
+  base_url: "http://127.0.0.1:11434"
   timeout: 30
   system_prompt: |
     Eres un asistente de seguridad para control de andén logístico.
