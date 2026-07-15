@@ -30,7 +30,7 @@ class YOLODetector:
         self.confidence = settings.detector.confidence
         self.iou_threshold = settings.detector.iou_threshold
         self.device = settings.detector.device
-        self.classes = settings.detector.classes
+        self.classes = settings.active_use_case.classes
         self.imgsz = settings.detector.imgsz
         self.use_tracking = settings.detector.track
         self._model: YOLO | None = None
