@@ -43,6 +43,7 @@ class Pipeline:
         self._running = False
         self._last_violation_time = 0.0
         self._violation_cooldown = 10.0  # seconds between notifications
+        self._zone_detections = []  # shared with video overlay
 
     def initialize(self):
         """Initialize all components based on active use case."""
@@ -146,6 +147,7 @@ class Pipeline:
             gate_controller=self.gate,
             camera=self.camera,
             detector=self.detector,
+            pipeline=self,
         )
         api_thread = Thread(
             target=uvicorn.run,
@@ -264,39 +266,35 @@ class Pipeline:
                     )
 
     def _process_zone_violation(self, frame, frame_count):
-        """Zone violation: detect colored objects on white paper outside safe zone.
+        """Zone violation: detect COLORED objects outside safe zone.
 
-        Uses contour detection on the paper area instead of YOLO,
-        since small figurines aren't in COCO classes.
+        Uses HSV saturation channel to find colored objects (high saturation)
+        while ignoring black pen lines (zero saturation) and white paper.
         """
         safe = self.uc_config.zones.safe_zone
         sx1, sy1, sx2, sy2 = safe
 
         h, w = frame.shape[:2]
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (11, 11), 0)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        saturation = hsv[:, :, 1]
 
-        # Threshold: white paper is bright (>200), objects are darker
-        _, thresh = cv2.threshold(blurred, 180, 255, cv2.THRESH_BINARY_INV)
+        # High saturation = colored object (Stitch is blue = high saturation)
+        # Black pen lines and white paper both have LOW saturation
+        _, sat_mask = cv2.threshold(saturation, 60, 255, cv2.THRESH_BINARY)
 
-        # Mask out the safe zone so we only detect OUTSIDE it
-        mask = np.zeros_like(thresh)
-        # Define detection region (the paper area, roughly)
-        paper_margin = 30
-        mask[paper_margin:h - paper_margin, paper_margin:w - paper_margin] = 255
-        # Black out the safe zone in the mask
-        mask[sy1:sy2, sx1:sx2] = 0
+        # Clean up noise
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        sat_mask = cv2.morphologyEx(sat_mask, cv2.MORPH_OPEN, kernel)
+        sat_mask = cv2.morphologyEx(sat_mask, cv2.MORPH_CLOSE, kernel)
 
-        # Apply mask: only look for objects outside safe zone
-        detection_area = cv2.bitwise_and(thresh, mask)
-
-        # Find contours of objects
+        # Find all colored objects in the full frame
         contours, _ = cv2.findContours(
-            detection_area, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            sat_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
-        min_area = 800  # ignore tiny noise
+        min_area = 500
         now = time.time()
+        self._zone_detections = []  # store for video overlay
 
         for cnt in contours:
             area = cv2.contourArea(cnt)
@@ -305,34 +303,34 @@ class Pipeline:
 
             x, y, bw, bh = cv2.boundingRect(cnt)
             cx, cy = x + bw // 2, y + bh // 2
+            inside = sx1 <= cx <= sx2 and sy1 <= cy <= sy2
 
-            if now - self._last_violation_time < self._violation_cooldown:
-                break
+            self._zone_detections.append((x, y, bw, bh, inside))
 
-            self._last_violation_time = now
-            logger.info(
-                "ZONE VIOLATION: object at (%d,%d) area=%d outside safe zone",
-                cx, cy, area,
-            )
-            self.telegram.notify(
-                event_type="zone_violation",
-                message=(
-                    f"Objeto detectado FUERA de la zona segura "
-                    f"(posición: {cx},{cy}, área: {area}px)"
-                ),
-                frame=frame,
-            )
-            self.db.insert_event(
-                GateEvent(
-                    event_type=EventType.ANOMALY_DETECTED,
-                    severity=Severity.HIGH,
-                    description="Objeto fuera de zona segura",
-                    track_id=0,
-                    frame_id=frame_count,
-                    metadata={"cx": cx, "cy": cy, "area": area},
+            if not inside and (now - self._last_violation_time >= self._violation_cooldown):
+                self._last_violation_time = now
+                logger.info(
+                    "ZONE VIOLATION: colored object at (%d,%d) area=%d outside safe zone",
+                    cx, cy, area,
                 )
-            )
-            break
+                self.telegram.notify(
+                    event_type="zone_violation",
+                    message=(
+                        f"Objeto detectado FUERA de la zona segura "
+                        f"(posición: {cx},{cy}, área: {area}px)"
+                    ),
+                    frame=frame,
+                )
+                self.db.insert_event(
+                    GateEvent(
+                        event_type=EventType.ANOMALY_DETECTED,
+                        severity=Severity.HIGH,
+                        description="Objeto fuera de zona segura",
+                        track_id=0,
+                        frame_id=frame_count,
+                        metadata={"cx": cx, "cy": cy, "area": area},
+                    )
+                )
 
     def _signal_handler(self, signum, frame):
         logger.info("Shutdown signal received")

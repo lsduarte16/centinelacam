@@ -19,7 +19,7 @@ class GateCommand(BaseModel):
     reason: str = ""
 
 
-def create_app(db: EventDatabase | None = None, gate_controller=None, camera=None, detector=None) -> FastAPI:
+def create_app(db: EventDatabase | None = None, gate_controller=None, camera=None, detector=None, pipeline=None) -> FastAPI:
     app = FastAPI(
         title="CAM-PI Gate Controller",
         description="Edge AI gate control system for loading docks",
@@ -91,7 +91,7 @@ def create_app(db: EventDatabase | None = None, gate_controller=None, camera=Non
         if not camera:
             raise HTTPException(503, "Camera not available")
         return StreamingResponse(
-            _generate_frames(camera, detector, gate_controller),
+            _generate_frames(camera, detector, gate_controller, pipeline),
             media_type="multipart/x-mixed-replace; boundary=frame",
         )
 
@@ -100,7 +100,7 @@ def create_app(db: EventDatabase | None = None, gate_controller=None, camera=Non
         """Single JPEG frame with detections."""
         if not camera or camera.frame is None:
             raise HTTPException(503, "No frame available")
-        frame = _annotate_frame(camera.frame.copy(), detector, gate_controller)
+        frame = _annotate_frame(camera.frame.copy(), detector, gate_controller, pipeline)
         _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return StreamingResponse(
             iter([jpeg.tobytes()]),
@@ -180,7 +180,7 @@ def create_app(db: EventDatabase | None = None, gate_controller=None, camera=Non
     return app
 
 
-def _generate_frames(camera, detector, gate_controller):
+def _generate_frames(camera, detector, gate_controller, pipeline=None):
     """Generate MJPEG frames with detection overlays."""
     while True:
         frame = camera.frame
@@ -188,31 +188,40 @@ def _generate_frames(camera, detector, gate_controller):
             time.sleep(0.1)
             continue
 
-        annotated = _annotate_frame(frame.copy(), detector, gate_controller)
+        annotated = _annotate_frame(frame.copy(), detector, gate_controller, pipeline)
         _, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
         yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
         time.sleep(0.1)
 
 
-def _annotate_frame(frame: np.ndarray, detector, gate_controller) -> np.ndarray:
+def _annotate_frame(frame: np.ndarray, detector, gate_controller, pipeline=None) -> np.ndarray:
     """Draw detections, zones, and status on frame."""
-    if detector:
-        result = detector.detect(frame)
-        for det in result.detections:
-            x1, y1, x2, y2 = det.bbox
-            color = (0, 255, 0) if det.class_id == 0 else (0, 200, 255)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            label = f"{det.class_name} {det.confidence:.0%}"
-            if det.track_id:
-                label += f" #{det.track_id}"
-            cv2.putText(frame, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
     uc = settings.active_use_case
+
     if settings.use_case == "zone_violation":
         sz = uc.zones.safe_zone
         cv2.rectangle(frame, (sz[0], sz[1]), (sz[2], sz[3]), (0, 255, 0), 2)
         cv2.putText(frame, "ZONA SEGURA", (sz[0] + 5, sz[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # Draw bounding boxes from contour-based detection
+        if pipeline and hasattr(pipeline, "_zone_detections"):
+            for (x, y, bw, bh, inside) in pipeline._zone_detections:
+                color = (0, 255, 0) if inside else (0, 0, 255)
+                label = "OK" if inside else "FUERA!"
+                cv2.rectangle(frame, (x, y), (x + bw, y + bh), color, 2)
+                cv2.putText(frame, label, (x, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
     else:
+        if detector:
+            result = detector.detect(frame)
+            for det in result.detections:
+                x1, y1, x2, y2 = det.bbox
+                color = (0, 255, 0) if det.class_id == 0 else (0, 200, 255)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                label = f"{det.class_name} {det.confidence:.0%}"
+                if det.track_id:
+                    label += f" #{det.track_id}"
+                cv2.putText(frame, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
         entry_zone = uc.zones.entry
         exit_zone = uc.zones.exit
         cv2.rectangle(frame, (entry_zone[0], entry_zone[1]), (entry_zone[2], entry_zone[3]), (255, 200, 0), 2)
@@ -220,9 +229,8 @@ def _annotate_frame(frame: np.ndarray, detector, gate_controller) -> np.ndarray:
         cv2.rectangle(frame, (exit_zone[0], exit_zone[1]), (exit_zone[2], exit_zone[3]), (0, 150, 255), 2)
         cv2.putText(frame, "SALIDA", (exit_zone[0] + 5, exit_zone[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 150, 255), 2)
 
-    gate_status = "ABIERTA" if (gate_controller and gate_controller.is_open) else "CERRADA"
-    gate_color = (0, 255, 0) if (gate_controller and gate_controller.is_open) else (0, 0, 255)
-    cv2.putText(frame, f"COMPUERTA: {gate_status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, gate_color, 2)
+    status_text = settings.use_case.upper().replace("_", " ")
+    cv2.putText(frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 200, 0), 2)
     cv2.putText(frame, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
     return frame
