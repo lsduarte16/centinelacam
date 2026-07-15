@@ -17,9 +17,10 @@ class CameraStream:
     """Manages RTSP connection to dome camera with auto-reconnect."""
 
     def __init__(self):
-        self.url = settings.camera.rtsp_url
-        self.fps = settings.camera.fps
+        self.url = settings.camera.source
+        self.fps = settings.active_use_case.fps
         self.resolution = tuple(settings.camera.resolution)
+        self._reconnect_delay = settings.camera.reconnect_delay
         self._cap: cv2.VideoCapture | None = None
         self._frame: np.ndarray | None = None
         self._running = Event()
@@ -79,7 +80,7 @@ class CameraStream:
         while self._running.is_set():
             if self._cap is None or not self._cap.isOpened():
                 if not self._connect():
-                    time.sleep(settings.camera.reconnect_delay)
+                    time.sleep(self._reconnect_delay)
                     continue
 
             start = time.time()
@@ -87,7 +88,7 @@ class CameraStream:
 
             if not ret:
                 logger.warning("Frame read failed, reconnecting...")
-                time.sleep(settings.camera.reconnect_delay)
+                time.sleep(self._reconnect_delay)
                 self._connect()
                 continue
 

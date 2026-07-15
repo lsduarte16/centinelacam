@@ -1,4 +1,4 @@
-"""Centralized configuration loader."""
+"""Centralized configuration loader with use-case support."""
 
 from pathlib import Path
 from typing import Any
@@ -8,9 +8,14 @@ from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
 
+class NodeConfig(BaseModel):
+    id: str = "node-001"
+    location: str = ""
+    description: str = ""
+
+
 class CameraConfig(BaseModel):
-    rtsp_url: str = "rtsp://admin:password@192.168.1.100:554/stream1"
-    fps: int = 15
+    source: str = "0"
     resolution: list[int] = [1280, 720]
     reconnect_delay: int = 5
 
@@ -20,41 +25,58 @@ class DetectorConfig(BaseModel):
     confidence: float = 0.45
     iou_threshold: float = 0.5
     device: str = "cpu"
-    classes: list[int] = [0, 2, 7]
     imgsz: int = 640
     track: bool = True
 
 
-class GateZones(BaseModel):
+class TelegramConfig(BaseModel):
+    enabled: bool = False
+    bot_token: str = ""
+    chat_id: str = ""
+    notify_on_event: bool = True
+    send_snapshot: bool = True
+    cooldown: int = 30
+
+
+class CountingLineConfig(BaseModel):
+    orientation: str = "horizontal"
+    position: int = 360
+    direction_in: str = "down"
+
+
+class ZonesConfig(BaseModel):
     entry: list[int] = [100, 200, 600, 500]
     exit: list[int] = [700, 200, 1200, 500]
+    active: list[int] = [100, 100, 1180, 620]
 
 
-class GateConfig(BaseModel):
-    gpio_pin: int = 17
+class UseCaseConfig(BaseModel):
+    description: str = ""
+    classes: list[int] = [0, 2, 7]
+    fps: int = 10
+    skip_frames: int = 2
+    gpio_pin: int | None = None
     open_duration: int = 30
     cooldown: int = 5
-    require_authorization: bool = True
-    authorized_plates: list[str] = []
-    zones: GateZones = GateZones()
+    zones: ZonesConfig = ZonesConfig()
+    counting_line: CountingLineConfig = CountingLineConfig()
+    scan_region: list[int] = [200, 150, 1080, 570]
+    motion_threshold: int = 5000
+    alert_after_seconds: int = 3
+    events: list[str] = []
 
 
 class LLMConfig(BaseModel):
     provider: str = "ollama"
     model: str = "tinyllama"
-    base_url: str = "http://localhost:11434"
+    base_url: str = "http://127.0.0.1:11434"
     timeout: int = 30
-    system_prompt: str = (
-        "Eres un asistente de seguridad para control de andén logístico. "
-        "Analiza eventos de cámara y genera alertas contextuales. "
-        "Responde SOLO en formato JSON con campos: action, severity, description."
-    )
 
 
 class CloudSyncConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     provider: str = "s3"
-    bucket: str = "cam-pi-backup"
+    bucket: str = "centinelacam-backup"
     sync_interval: int = 3600
 
 
@@ -79,13 +101,22 @@ class LoggingConfig(BaseModel):
 
 
 class Settings(BaseSettings):
+    use_case: str = "gate_control"
+    node: NodeConfig = NodeConfig()
     camera: CameraConfig = CameraConfig()
     detector: DetectorConfig = DetectorConfig()
-    gate: GateConfig = GateConfig()
+    telegram: TelegramConfig = TelegramConfig()
+    use_cases: dict[str, Any] = {}
     llm: LLMConfig = LLMConfig()
     storage: StorageConfig = StorageConfig()
     api: APIConfig = APIConfig()
     logging: LoggingConfig = LoggingConfig()
+
+    @property
+    def active_use_case(self) -> UseCaseConfig:
+        """Get the configuration for the active use case."""
+        uc_data = self.use_cases.get(self.use_case, {})
+        return UseCaseConfig(**uc_data)
 
 
 def load_settings(config_path: str | Path | None = None) -> Settings:

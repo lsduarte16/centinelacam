@@ -25,12 +25,12 @@ class GateController:
     """Controls physical gate relay based on detection events."""
 
     def __init__(self):
-        self.gpio_pin = settings.gate.gpio_pin
-        self.open_duration = settings.gate.open_duration
-        self.cooldown = settings.gate.cooldown
-        self.require_auth = settings.gate.require_authorization
-        self.entry_zone = settings.gate.zones.entry
-        self.exit_zone = settings.gate.zones.exit
+        uc = settings.active_use_case
+        self.gpio_pin = uc.gpio_pin or 17
+        self.open_duration = uc.open_duration
+        self.cooldown = uc.cooldown
+        self.entry_zone = uc.zones.entry
+        self.exit_zone = uc.zones.exit
 
         self._relay = None
         self._is_open = False

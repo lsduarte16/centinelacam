@@ -134,7 +134,7 @@ def create_app(db: EventDatabase | None = None, gate_controller=None, camera=Non
         <body>
             <div class="container">
                 <h1>CentinelaCam</h1>
-                <p class="subtitle">Control de Compuerta - Vision en Tiempo Real</p>
+                <p class="subtitle">{settings.node.location} | {settings.active_use_case.description}</p>
                 <div class="video-box">
                     <img src="/video" alt="Live Feed">
                 </div>
@@ -207,8 +207,9 @@ def _annotate_frame(frame: np.ndarray, detector, gate_controller) -> np.ndarray:
                 label += f" #{det.track_id}"
             cv2.putText(frame, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    entry_zone = settings.gate.zones.entry
-    exit_zone = settings.gate.zones.exit
+    uc = settings.active_use_case
+    entry_zone = uc.zones.entry
+    exit_zone = uc.zones.exit
     cv2.rectangle(frame, (entry_zone[0], entry_zone[1]), (entry_zone[2], entry_zone[3]), (255, 200, 0), 2)
     cv2.putText(frame, "ENTRADA", (entry_zone[0] + 5, entry_zone[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 0), 2)
     cv2.rectangle(frame, (exit_zone[0], exit_zone[1]), (exit_zone[2], exit_zone[3]), (0, 150, 255), 2)

@@ -31,6 +31,9 @@ gpio = [
     "gpiozero>=2.0",
     "RPi.GPIO>=0.7.1",
 ]
+barcode = [
+    "pyzbar>=0.1.9",
+]
 
 [tool.ruff]
 target-version = "py311"

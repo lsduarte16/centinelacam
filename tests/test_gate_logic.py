@@ -1,5 +1,9 @@
 """Tests for gate logic controller."""
 
+import os
+
+os.environ.setdefault("USE_CASE", "gate_control")
+
 from src.detector.models import Detection, TrackingResult
 from src.gate_logic.controller import GateController
 from src.gate_logic.events import EventType

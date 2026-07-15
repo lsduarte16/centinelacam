@@ -1,59 +1,144 @@
 # =============================================================================
-# CAM-PI GATE CONTROLLER - Configuration
+# CENTINELACAM - Edge AI Vision System
+# Cada Raspberry Pi ejecuta UN solo caso de uso
 # =============================================================================
 
+# --- Caso de uso activo ---
+# Opciones: gate_control | people_counter | package_counter | barcode_reader | sorter_monitor
+use_case: "gate_control"
+
+# --- Identificación del nodo ---
+node:
+  id: "retail001"
+  location: "Puerta C05"
+  description: "Control de compuerta andén"
+
+# --- Cámara ---
 camera:
-  # Para USB usar device index (0) o ruta (/dev/video0)
-  # Para IP usar rtsp_url: "rtsp://admin:password@192.168.1.100:554/stream1"
-  rtsp_url: "0"
-  fps: 15
+  # USB: "0" | RTSP: "rtsp://admin:pass@192.168.1.100:554/stream1"
+  source: "0"
   resolution: [1280, 720]
   reconnect_delay: 5
 
+# --- Detección ---
 detector:
-  model: "yolov8n.pt"          # nano model for RPi5 performance
+  model: "yolov8n.pt"
   confidence: 0.45
   iou_threshold: 0.5
-  device: "cpu"                 # or "0" for GPU if available
-  classes: [0, 2, 7]           # person, car, truck (COCO)
+  device: "cpu"
   imgsz: 640
-  track: true                  # enable object tracking
+  track: true
 
-gate:
-  gpio_pin: 17                 # relay control pin
-  open_duration: 30            # seconds gate stays open
-  cooldown: 5                  # seconds between activations
-  require_authorization: true
-  authorized_plates: []        # loaded from DB
-  zones:
-    entry: [100, 200, 600, 500]   # ROI for entry detection [x1,y1,x2,y2]
-    exit: [700, 200, 1200, 500]   # ROI for exit detection
+# --- Telegram ---
+telegram:
+  enabled: true
+  bot_token: ""
+  chat_id: ""
+  notify_on_event: true
+  send_snapshot: true
+  cooldown: 30              # segundos entre notificaciones del mismo tipo
 
+# --- Configuraciones por caso de uso ---
+use_cases:
+
+  gate_control:
+    description: "Control de compuerta de andén"
+    classes: [0, 2, 7]     # persona, auto, camión
+    fps: 10
+    skip_frames: 2
+    gpio_pin: 17
+    open_duration: 30
+    cooldown: 5
+    zones:
+      entry: [100, 200, 600, 500]
+      exit: [700, 200, 1200, 500]
+    events:
+      - vehicle_entry
+      - unauthorized_access
+      - zone_crowded
+
+  people_counter:
+    description: "Conteo de personas bidireccional"
+    classes: [0]           # solo personas
+    fps: 12
+    skip_frames: 2
+    counting_line:
+      orientation: "horizontal"  # horizontal | vertical
+      position: 360              # posición Y (horizontal) o X (vertical)
+      direction_in: "down"       # dirección que cuenta como entrada
+    zones:
+      entry: [0, 0, 1280, 360]
+      exit: [0, 360, 1280, 720]
+    events:
+      - person_entry
+      - person_exit
+      - zone_crowded
+
+  package_counter:
+    description: "Conteo de paquetes en cinta"
+    classes: [24, 25, 26, 28]  # backpack, umbrella, handbag, suitcase (como proxy)
+    fps: 15
+    skip_frames: 1
+    counting_line:
+      orientation: "vertical"
+      position: 640
+      direction_in: "right"
+    zones:
+      entry: [0, 100, 640, 620]
+      exit: [640, 100, 1280, 620]
+    events:
+      - package_detected
+      - package_counted
+
+  barcode_reader:
+    description: "Lectura de códigos de barra y QR"
+    classes: []            # no usa YOLO, usa pyzbar
+    fps: 15
+    skip_frames: 1
+    scan_region: [200, 150, 1080, 570]  # ROI para escaneo [x1,y1,x2,y2]
+    events:
+      - barcode_read
+      - barcode_duplicate
+
+  sorter_monitor:
+    description: "Monitoreo de caída en sorter"
+    classes: [0, 24, 25, 26, 28]
+    fps: 15
+    skip_frames: 1
+    motion_threshold: 5000    # pixeles de diferencia para detectar caída
+    alert_after_seconds: 3    # alertar si no hay movimiento por N segundos
+    zones:
+      active: [100, 100, 1180, 620]
+    events:
+      - sorter_jam
+      - sorter_idle
+      - object_fallen
+
+# --- LLM local ---
 llm:
   provider: "ollama"
-  model: "tinyllama"           # lightweight model for RPi5
+  model: "tinyllama"
   base_url: "http://127.0.0.1:11434"
   timeout: 30
-  system_prompt: |
-    Eres un asistente de seguridad para control de andén logístico.
-    Analiza eventos de cámara y genera alertas contextuales.
-    Responde SOLO en formato JSON con campos: action, severity, description.
 
+# --- Almacenamiento ---
 storage:
   local_path: "/data/cam-pi"
   db_path: "/data/cam-pi/events.db"
   retention_days: 30
   cloud_sync:
-    enabled: true
-    provider: "s3"             # s3, gcs, or azure
-    bucket: "cam-pi-backup"
-    sync_interval: 3600        # seconds
+    enabled: false
+    provider: "s3"
+    bucket: "centinelacam-backup"
+    sync_interval: 3600
 
+# --- API ---
 api:
   host: "0.0.0.0"
   port: 8000
   cors_origins: ["*"]
 
+# --- Logging ---
 logging:
   level: "INFO"
   file: "/data/cam-pi/logs/app.log"
