@@ -37,6 +37,13 @@ class TelegramConfig(BaseModel):
     send_snapshot: bool = True
     cooldown: int = 30
 
+    def model_post_init(self, __context):
+        import os
+        if not self.bot_token:
+            self.bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        if not self.chat_id:
+            self.chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+
 
 class CountingLineConfig(BaseModel):
     orientation: str = "horizontal"

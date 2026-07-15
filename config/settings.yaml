@@ -32,8 +32,8 @@ detector:
 # --- Telegram ---
 telegram:
   enabled: true
-  bot_token: ""
-  chat_id: ""
+  bot_token: ""             # set via TELEGRAM_BOT_TOKEN env var
+  chat_id: ""              # set via TELEGRAM_CHAT_ID env var
   notify_on_event: true
   send_snapshot: true
   cooldown: 30              # segundos entre notificaciones del mismo tipo
