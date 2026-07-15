@@ -1,0 +1,67 @@
+services:
+  cam-pi:
+    build: .
+    container_name: cam-pi-gate
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /data/cam-pi:/data/cam-pi
+      - ./config:/app/config:ro
+    devices:
+      - /dev/video0:/dev/video0    # USB camera fallback
+      - /dev/gpiomem:/dev/gpiomem  # GPIO access
+    privileged: false
+    cap_add:
+      - SYS_RAWIO
+    environment:
+      - PYTHONPATH=/app
+    networks:
+      - cam-net
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8000/health'); assert r.status_code==200"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cam-pi-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - cam-net
+
+  # Optional: Watchtower for automatic container updates
+  watchtower:
+    image: containrrr/watchtower
+    container_name: cam-pi-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_LABEL_ENABLE=true
+    profiles:
+      - auto-update
+
+volumes:
+  ollama_data:
+
+networks:
+  cam-net:
+    driver: bridge

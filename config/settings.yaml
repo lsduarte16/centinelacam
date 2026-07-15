@@ -1,0 +1,59 @@
+# =============================================================================
+# CAM-PI GATE CONTROLLER - Configuration
+# =============================================================================
+
+camera:
+  rtsp_url: "rtsp://admin:password@192.168.1.100:554/stream1"
+  fps: 15
+  resolution: [1280, 720]
+  reconnect_delay: 5
+
+detector:
+  model: "yolov8n.pt"          # nano model for RPi5 performance
+  confidence: 0.45
+  iou_threshold: 0.5
+  device: "cpu"                 # or "0" for GPU if available
+  classes: [0, 2, 7]           # person, car, truck (COCO)
+  imgsz: 640
+  track: true                  # enable object tracking
+
+gate:
+  gpio_pin: 17                 # relay control pin
+  open_duration: 30            # seconds gate stays open
+  cooldown: 5                  # seconds between activations
+  require_authorization: true
+  authorized_plates: []        # loaded from DB
+  zones:
+    entry: [100, 200, 600, 500]   # ROI for entry detection [x1,y1,x2,y2]
+    exit: [700, 200, 1200, 500]   # ROI for exit detection
+
+llm:
+  provider: "ollama"
+  model: "tinyllama"           # lightweight model for RPi5
+  base_url: "http://localhost:11434"
+  timeout: 30
+  system_prompt: |
+    Eres un asistente de seguridad para control de andén logístico.
+    Analiza eventos de cámara y genera alertas contextuales.
+    Responde SOLO en formato JSON con campos: action, severity, description.
+
+storage:
+  local_path: "/data/cam-pi"
+  db_path: "/data/cam-pi/events.db"
+  retention_days: 30
+  cloud_sync:
+    enabled: true
+    provider: "s3"             # s3, gcs, or azure
+    bucket: "cam-pi-backup"
+    sync_interval: 3600        # seconds
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins: ["*"]
+
+logging:
+  level: "INFO"
+  file: "/data/cam-pi/logs/app.log"
+  max_size_mb: 50
+  backup_count: 5
