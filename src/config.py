@@ -78,6 +78,11 @@ class LLMConfig(BaseModel):
     model: str = "tinyllama"
     base_url: str = "http://127.0.0.1:11434"
     timeout: int = 30
+    system_prompt: str = (
+        "Eres un asistente de seguridad para control de andén logístico. "
+        "Analiza eventos de cámara y genera alertas contextuales. "
+        "Responde SOLO en formato JSON con campos: action, severity, description."
+    )
 
 
 class CloudSyncConfig(BaseModel):
