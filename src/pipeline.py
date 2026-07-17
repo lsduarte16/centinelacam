@@ -143,6 +143,9 @@ class Pipeline:
             host=settings.api.host,
             port=settings.api.port,
             log_level="warning",
+            # uvloop/httptools hang on this ARM64 build; use portable stack
+            loop="asyncio",
+            http="h11",
         )
         server = uvicorn.Server(config)
         # Disable signal handlers so uvicorn can serve from a worker thread
