@@ -50,7 +50,7 @@ class RuntimeZonesConfig(BaseModel):
 
 class TrainingConfig(BaseModel):
     enabled: bool = False
-    destination_url: str = "http://192.168.1.47:8787/api/training/upload"
+    destination_url: str = "http://127.0.0.1:8787/api/training/upload"
     current_label: str = ""
     auto_capture: bool = False
     auto_capture_interval_sec: float = 2.0
