@@ -46,6 +46,8 @@ class Pipeline:
         self._running = False
         self._last_violation_time = 0.0
         self._zone_detections: list = []
+        self._yolo_detections: list = []
+        self._last_watch_notify: dict[str, float] = {}
 
     def initialize(self):
         Path(settings.storage.local_path).mkdir(parents=True, exist_ok=True)
@@ -193,6 +195,8 @@ class Pipeline:
                 self._process_sorter(frame, frame_count)
             elif use_case == "zone_violation":
                 self._process_zone_violation(frame, frame_count)
+            elif use_case == "object_watch":
+                self._process_object_watch(frame, frame_count)
 
             elapsed_ms = (time.time() - start) * 1000
             metrics_collector.record_frame(elapsed_ms)
@@ -204,7 +208,65 @@ class Pipeline:
     def _process_training(self, frame):
         """Training mode: only capture and upload labeled frames."""
         self._zone_detections = []
+        self._yolo_detections = []
         self.training.maybe_auto_capture(frame)
+
+    def _process_object_watch(self, frame, frame_count):
+        """Detect selected YOLO/COCO classes and optionally notify."""
+        rc = runtime_config.data
+        watch = rc.detector.watch_classes or [0]
+        self.detector.classes = watch
+        self._zone_detections = []
+
+        result = self.detector.detect(frame)
+        self._yolo_detections = [
+            {
+                "bbox": det.bbox,
+                "class_name": det.class_name,
+                "confidence": det.confidence,
+                "track_id": det.track_id,
+            }
+            for det in result.detections
+        ]
+
+        if not rc.detector.notify_on_detect or not result.detections:
+            return
+
+        cooldown = rc.telegram.cooldown
+        now = time.time()
+        for det in result.detections:
+            key = f"{det.class_name}:{det.track_id or 'na'}"
+            last = self._last_watch_notify.get(key, 0)
+            if now - last < cooldown:
+                continue
+            self._last_watch_notify[key] = now
+            logger.info(
+                "OBJECT WATCH: %s conf=%.0f%% track=%s",
+                det.class_name, det.confidence * 100, det.track_id,
+            )
+            self.telegram.notify(
+                event_type="object_detected",
+                message=(
+                    f"Detectado: {det.class_name} "
+                    f"({det.confidence:.0%})"
+                    + (f" #{det.track_id}" if det.track_id else "")
+                ),
+                frame=frame,
+            )
+            self.db.insert_event(
+                GateEvent(
+                    event_type=EventType.ANOMALY_DETECTED,
+                    severity=Severity.MEDIUM,
+                    description=f"Detectado {det.class_name}",
+                    track_id=det.track_id or 0,
+                    frame_id=frame_count,
+                    metadata={
+                        "class": det.class_name,
+                        "class_id": det.class_id,
+                        "confidence": round(det.confidence, 3),
+                    },
+                )
+            )
 
     def _process_gate_control(self, frame, frame_count):
         result = self.detector.detect(frame)

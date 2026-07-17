@@ -4,7 +4,7 @@
 # =============================================================================
 
 # --- Caso de uso activo ---
-# Opciones: gate_control | people_counter | package_counter | barcode_reader | sorter_monitor | zone_violation
+# Opciones: gate_control | people_counter | package_counter | barcode_reader | sorter_monitor | zone_violation | object_watch
 use_case: "zone_violation"
 
 # --- Identificación del nodo ---
@@ -128,6 +128,14 @@ use_cases:
       safe_zone: [340, 180, 740, 500]
     events:
       - zone_violation
+
+  object_watch:
+    description: "Detectar clases YOLO seleccionables (personas, animales, objetos)"
+    classes: [0, 15, 16]
+    fps: 8
+    skip_frames: 2
+    events:
+      - object_detected
 
 # --- LLM local ---
 llm:

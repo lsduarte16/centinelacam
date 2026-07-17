@@ -86,4 +86,10 @@ def create_control_router(pipeline=None, camera=None, training_uploader=None) ->
         runtime_config.update(patch)
         return {"status": "ok", "mode": mode}
 
+    @router.get("/classes")
+    async def list_classes():
+        from src.detector.coco_classes import COCO_GROUPS, class_catalog
+
+        return {"classes": class_catalog(), "groups": COCO_GROUPS}
+
     return router

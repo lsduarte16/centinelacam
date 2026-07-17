@@ -20,7 +20,7 @@
     header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
     h1 { margin: 0; font-size: 1.4rem; color: var(--accent); }
     .subtitle { color: var(--muted); font-size: 0.9rem; }
-    .layout { display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 16px; min-height: calc(100vh - 64px); }
+    .layout { display: grid; grid-template-columns: 1fr 400px; gap: 16px; padding: 16px; min-height: calc(100vh - 64px); }
     @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
     .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
     .panel h2 { margin: 0 0 12px; font-size: 1rem; color: var(--accent); }
@@ -31,7 +31,7 @@
       width: 100%; padding: 8px 10px; border-radius: 6px;
       border: 1px solid var(--border); background: #0f1419; color: var(--text);
     }
-    textarea { min-height: 80px; resize: vertical; font-family: inherit; }
+    textarea { min-height: 70px; resize: vertical; font-family: inherit; }
     button { cursor: pointer; background: var(--accent); color: #111; font-weight: 600; border: none; margin-top: 8px; }
     button.secondary { background: #2d3a4f; color: var(--text); }
     button.danger { background: var(--err); color: #fff; }
@@ -42,16 +42,22 @@
     .metric .lbl { font-size: 0.75rem; color: var(--muted); }
     .toggle { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
     .toggle input { width: auto; }
-    .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
-    .tab { flex: 1; padding: 8px; text-align: center; border-radius: 6px; cursor: pointer; background: #0f1419; border: 1px solid var(--border); font-size: 0.85rem; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+    .tab { flex: 1; min-width: 70px; padding: 8px; text-align: center; border-radius: 6px; cursor: pointer; background: #0f1419; border: 1px solid var(--border); font-size: 0.8rem; }
     .tab.active { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
-    .status-pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; }
+    .status-pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; margin-left: 4px; }
     .status-pill.on { background: #1b3d1b; color: var(--ok); }
     .status-pill.off { background: #3d1b1b; color: var(--err); }
     .toast { position: fixed; bottom: 20px; right: 20px; background: var(--panel); border: 1px solid var(--border); padding: 12px 20px; border-radius: 8px; display: none; z-index: 99; }
     .toast.show { display: block; }
+    .class-grid { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: #0f1419; }
+    .class-group { margin-bottom: 10px; }
+    .class-group h3 { margin: 0 0 6px; font-size: 0.75rem; color: var(--accent); text-transform: uppercase; }
+    .class-item { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 0.85rem; }
+    .class-item input { width: auto; }
+    .hint { font-size: 0.75rem; color: var(--muted); margin: 6px 0 0; }
   </style>
 </head>
 <body>
@@ -80,6 +86,7 @@
     <div>
       <div class="tabs">
         <div class="tab active" data-tab="mission">Misión</div>
+        <div class="tab" data-tab="targets">Objetivos</div>
         <div class="tab" data-tab="processing">Proceso</div>
         <div class="tab" data-tab="training">Training</div>
       </div>
@@ -87,13 +94,47 @@
       <div id="tab-mission" class="tab-content active">
         <div class="panel">
           <h2>Misión y Prompt</h2>
+          <label>Tipo de misión (use case)</label>
+          <select id="useCase">
+            <option value="object_watch">object_watch — detectar clases YOLO</option>
+            <option value="zone_violation">zone_violation — figura fuera de zona</option>
+            <option value="gate_control">gate_control — control de compuerta</option>
+            <option value="people_counter">people_counter — conteo personas</option>
+            <option value="package_counter">package_counter — conteo paquetes</option>
+            <option value="sorter_monitor">sorter_monitor — sorter</option>
+            <option value="barcode_reader">barcode_reader — códigos</option>
+          </select>
           <label>Nombre misión</label>
           <input id="missionName" type="text">
           <label>Descripción</label>
           <input id="missionDesc" type="text">
-          <label>System prompt (LLM)</label>
+          <label>System prompt (LLM / reglas de la misión)</label>
           <textarea id="missionPrompt"></textarea>
+          <p class="hint">El prompt define reglas/contexto. Los objetivos visuales se eligen en la pestaña Objetivos (clases YOLO).</p>
           <button onclick="saveMission()">Guardar misión</button>
+        </div>
+      </div>
+
+      <div id="tab-targets" class="tab-content">
+        <div class="panel">
+          <h2>Objetivos YOLO (COCO)</h2>
+          <p class="hint">Seleccioná qué detectar. Aplica en la misión <b>object_watch</b>.</p>
+          <div class="toggle">
+            <input id="notifyOnDetect" type="checkbox" checked>
+            <label style="margin:0">Notificar por Telegram al detectar</label>
+          </div>
+          <label>Confianza mínima</label>
+          <input id="confidence" type="number" min="0.1" max="0.95" step="0.05">
+          <div class="row" style="margin-top:8px">
+            <button class="secondary" type="button" onclick="selectGroup('Animales')">Animales</button>
+            <button class="secondary" type="button" onclick="selectGroup('Personas')">Personas</button>
+          </div>
+          <div class="row">
+            <button class="secondary" type="button" onclick="selectGroup('Vehiculos')">Vehículos</button>
+            <button class="secondary" type="button" onclick="clearClasses()">Limpiar</button>
+          </div>
+          <div id="classGrid" class="class-grid" style="margin-top:10px"></div>
+          <button onclick="saveTargets()">Guardar objetivos + activar object_watch</button>
         </div>
       </div>
 
@@ -124,7 +165,7 @@
       <div id="tab-training" class="tab-content">
         <div class="panel">
           <h2>Modo entrenamiento</h2>
-          <p style="font-size:0.85rem;color:var(--muted)">Captura imágenes y las envía por POST al destino. No se guardan en la RPi.</p>
+          <p class="hint">Captura imágenes y las envía por POST al destino. No se guardan en la RPi.</p>
           <div class="row">
             <button onclick="setMode('training')">Activar Training</button>
             <button class="secondary" onclick="setMode('inference')">Modo Inferencia</button>
@@ -151,6 +192,8 @@
 
   <script>
     const $ = id => document.getElementById(id);
+    let allClasses = [];
+    let selectedIds = new Set();
 
     function toast(msg, ok=true) {
       const t = $('toast');
@@ -172,14 +215,49 @@
     function parseZone(s) {
       return s.split(',').map(v => parseInt(v.trim(), 10));
     }
+    function fmtZone(arr) { return (arr || []).join(','); }
 
-    function fmtZone(arr) {
-      return (arr || []).join(',');
+    function renderClasses() {
+      const groups = {};
+      allClasses.forEach(c => {
+        if (!groups[c.group]) groups[c.group] = [];
+        groups[c.group].push(c);
+      });
+      let html = '';
+      Object.keys(groups).forEach(g => {
+        html += `<div class="class-group"><h3>${g}</h3>`;
+        groups[g].forEach(c => {
+          const checked = selectedIds.has(c.id) ? 'checked' : '';
+          html += `<label class="class-item"><input type="checkbox" value="${c.id}" ${checked} onchange="toggleClass(${c.id}, this.checked)"><span>${c.name} <span style="color:var(--muted)">#${c.id}</span></span></label>`;
+        });
+        html += '</div>';
+      });
+      $('classGrid').innerHTML = html || '<p class="hint">Sin clases</p>';
+    }
+
+    function toggleClass(id, on) {
+      if (on) selectedIds.add(id); else selectedIds.delete(id);
+    }
+    function selectGroup(group) {
+      allClasses.filter(c => c.group === group).forEach(c => selectedIds.add(c.id));
+      renderClasses();
+    }
+    function clearClasses() {
+      selectedIds.clear();
+      renderClasses();
+    }
+
+    async function loadClasses() {
+      const r = await fetch('/api/classes');
+      const d = await r.json();
+      allClasses = d.classes || [];
+      renderClasses();
     }
 
     async function loadConfig() {
       const r = await fetch('/api/config');
       const c = await r.json();
+      $('useCase').value = c.processing?.use_case || 'zone_violation';
       $('missionName').value = c.mission?.name || '';
       $('missionDesc').value = c.mission?.description || '';
       $('missionPrompt').value = c.mission?.prompt || '';
@@ -190,11 +268,15 @@
       $('paperRoi').value = fmtZone(c.zones?.paper_roi);
       $('safeZone').value = fmtZone(c.zones?.safe_zone);
       $('minArea').value = c.detector?.min_object_area || 1200;
+      $('confidence').value = c.detector?.confidence ?? 0.45;
+      $('notifyOnDetect').checked = c.detector?.notify_on_detect ?? true;
+      selectedIds = new Set(c.detector?.watch_classes || [0, 15, 16]);
+      renderClasses();
       $('trainUrl').value = c.training?.destination_url || '';
       $('trainLabel').value = c.training?.current_label || '';
       $('autoCapture').checked = c.training?.auto_capture || false;
       $('autoInterval').value = c.training?.auto_capture_interval_sec || 2;
-      $('nodeInfo').textContent = `${c.mission?.description || '—'} | ${c.processing?.use_case || '—'}`;
+      $('nodeInfo').textContent = `${c.mission?.name || '—'} | ${c.processing?.use_case || '—'}`;
       updatePills(c);
     }
 
@@ -223,9 +305,33 @@
             name: $('missionName').value,
             description: $('missionDesc').value,
             prompt: $('missionPrompt').value,
-          }
+          },
+          processing: { use_case: $('useCase').value },
         });
         toast('Misión guardada');
+        loadConfig();
+      } catch(e) { toast('Error: ' + e.message, false); }
+    }
+
+    async function saveTargets() {
+      if (selectedIds.size === 0) {
+        toast('Seleccioná al menos una clase', false);
+        return;
+      }
+      try {
+        await patchConfig({
+          processing: { use_case: 'object_watch' },
+          detector: {
+            watch_classes: Array.from(selectedIds),
+            confidence: +$('confidence').value,
+            notify_on_detect: $('notifyOnDetect').checked,
+          },
+          mission: {
+            name: $('missionName').value || 'object_watch',
+            description: $('missionDesc').value || 'Detección YOLO de clases seleccionadas',
+          },
+        });
+        toast('Objetivos activos (object_watch)');
         loadConfig();
       } catch(e) { toast('Error: ' + e.message, false); }
     }
@@ -241,7 +347,7 @@
           },
           detector: { min_object_area: +$('minArea').value },
         });
-        toast('Procesamiento guardado (aplica sin redeploy)');
+        toast('Procesamiento guardado');
         loadConfig();
       } catch(e) { toast('Error: ' + e.message, false); }
     }
@@ -305,7 +411,7 @@
       } catch(e) {}
     }
 
-    loadConfig();
+    loadClasses().then(loadConfig);
     updateMetrics();
     updateTrainStats();
     setInterval(updateMetrics, 2000);

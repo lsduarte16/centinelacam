@@ -7,19 +7,14 @@ import numpy as np
 from ultralytics import YOLO
 
 from src.config import settings
+from src.runtime.store import runtime_config
 
+from .coco_classes import COCO_CLASSES
 from .models import Detection, TrackingResult
 
 logger = logging.getLogger(__name__)
 
-COCO_NAMES = {
-    0: "persona",
-    1: "bicicleta",
-    2: "auto",
-    3: "moto",
-    5: "bus",
-    7: "camion",
-}
+COCO_NAMES = COCO_CLASSES
 
 
 class YOLODetector:
@@ -27,7 +22,6 @@ class YOLODetector:
 
     def __init__(self):
         self.model_path = settings.detector.model
-        self.confidence = settings.detector.confidence
         self.iou_threshold = settings.detector.iou_threshold
         self.device = settings.detector.device
         self.classes = settings.active_use_case.classes
@@ -35,6 +29,10 @@ class YOLODetector:
         self.use_tracking = settings.detector.track
         self._model: YOLO | None = None
         self._frame_count = 0
+
+    @property
+    def confidence(self) -> float:
+        return runtime_config.data.detector.confidence
 
     def load(self) -> "YOLODetector":
         """Load the YOLO model. Downloads if not present."""

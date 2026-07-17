@@ -172,6 +172,16 @@ def _annotate_frame(frame: np.ndarray, detector, gate_controller, pipeline=None)
                 label = "DENTRO" if inside else "FUERA!"
                 cv2.rectangle(frame, (x, y), (x + bw, y + bh), color, 3)
                 cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+    elif use_case == "object_watch":
+        dets = getattr(pipeline, "_yolo_detections", []) if pipeline else []
+        for det in dets:
+            x1, y1, x2, y2 = det["bbox"]
+            color = (0, 200, 255)
+            label = f"{det['class_name']} {det['confidence']:.0%}"
+            if det.get("track_id"):
+                label += f" #{det['track_id']}"
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
     else:
         if detector:
             result = detector.detect(frame)
@@ -184,7 +194,6 @@ def _annotate_frame(frame: np.ndarray, detector, gate_controller, pipeline=None)
                     label += f" #{det.track_id}"
                 cv2.putText(frame, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    mode = rc.mission.mode.upper()
     if rc.mission.mode == "training":
         cv2.putText(frame, f"TRAINING: {rc.training.current_label or 'sin label'}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)

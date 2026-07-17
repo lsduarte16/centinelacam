@@ -61,6 +61,9 @@ class RuntimeDetectorConfig(BaseModel):
     confidence: float = 0.45
     min_object_area: int = 1200
     saturation_threshold: int = 60
+    # COCO class IDs to watch when use_case=object_watch
+    watch_classes: list[int] = Field(default_factory=lambda: [0, 15, 16])
+    notify_on_detect: bool = True
 
 
 class RuntimeConfigData(BaseModel):
