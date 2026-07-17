@@ -1,6 +1,7 @@
 """RTSP camera stream capture with reconnection logic."""
 
 import logging
+import os
 import time
 from collections.abc import Generator
 from threading import Event, Thread
@@ -62,6 +63,10 @@ class CameraStream:
             self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
             self._cap.set(cv2.CAP_PROP_FPS, self.fps)
         else:
+            # RTSP: force TCP transport for reliable H.264/H.265 streaming
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                "rtsp_transport;tcp|stimeout;5000000"
+            )
             self._cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
 
         self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)

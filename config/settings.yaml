@@ -15,7 +15,8 @@ node:
 
 # --- Cámara ---
 camera:
-  # USB: "0" | RTSP: "rtsp://admin:pass@192.168.1.100:554/stream1"
+  # Fuente por defecto. Se puede overridear con env CAMERA_SOURCE
+  # USB: "0" | RTSP: "rtsp://admin:pass@10.10.10.114:554/Streaming/Channels/101"
   source: "0"
   resolution: [1280, 720]
   reconnect_delay: 5

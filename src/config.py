@@ -19,6 +19,12 @@ class CameraConfig(BaseModel):
     resolution: list[int] = [1280, 720]
     reconnect_delay: int = 5
 
+    def model_post_init(self, __context):
+        import os
+        env_source = os.environ.get("CAMERA_SOURCE", "").strip()
+        if env_source:
+            self.source = env_source
+
 
 class DetectorConfig(BaseModel):
     model: str = "yolov8n.pt"
