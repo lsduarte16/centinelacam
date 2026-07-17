@@ -37,21 +37,6 @@ class MetricsCollector:
             else:
                 self._training_uploads_fail += 1
 
-    def _fps(self) -> float:
-        with self._lock:
-            if len(self._frame_times) < 2:
-                return 0.0
-            span = self._frame_times[-1] - self._frame_times[0]
-            if span <= 0:
-                return 0.0
-            return round((len(self._frame_times) - 1) / span, 2)
-
-    def _avg_process_ms(self) -> float:
-        with self._lock:
-            if not self._process_times:
-                return 0.0
-            return round(sum(self._process_times) / len(self._process_times), 1)
-
     def snapshot(self) -> dict:
         cpu_pct = mem_pct = mem_used_mb = mem_total_mb = 0.0
         if psutil:
@@ -62,6 +47,17 @@ class MetricsCollector:
             mem_total_mb = round(mem.total / (1024 * 1024), 1)
 
         with self._lock:
+            if len(self._frame_times) >= 2:
+                span = self._frame_times[-1] - self._frame_times[0]
+                fps = round((len(self._frame_times) - 1) / span, 2) if span > 0 else 0.0
+            else:
+                fps = 0.0
+
+            avg_ms = (
+                round(sum(self._process_times) / len(self._process_times), 1)
+                if self._process_times
+                else 0.0
+            )
             last_frame_age = (
                 round(time.time() - self._last_frame_ts, 2) if self._last_frame_ts else None
             )
@@ -70,8 +66,8 @@ class MetricsCollector:
                 "memory_percent": mem_pct,
                 "memory_used_mb": mem_used_mb,
                 "memory_total_mb": mem_total_mb,
-                "pipeline_fps": self._fps(),
-                "avg_process_ms": self._avg_process_ms(),
+                "pipeline_fps": fps,
+                "avg_process_ms": avg_ms,
                 "frames_processed": self._frames_processed,
                 "last_frame_age_sec": last_frame_age,
                 "training_uploads_ok": self._training_uploads_ok,
