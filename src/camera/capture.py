@@ -65,7 +65,7 @@ class CameraStream:
         else:
             # RTSP: force TCP transport for reliable H.264/H.265 streaming
             os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-                "rtsp_transport;tcp|stimeout;5000000"
+                "rtsp_transport;tcp|timeout;5000000|max_delay;500000"
             )
             self._cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
 

@@ -138,12 +138,16 @@ class Pipeline:
             pipeline=self,
             training_uploader=self.training,
         )
-        api_thread = Thread(
-            target=uvicorn.run,
-            args=(api_app,),
-            kwargs={"host": settings.api.host, "port": settings.api.port, "log_level": "warning"},
-            daemon=True,
+        config = uvicorn.Config(
+            api_app,
+            host=settings.api.host,
+            port=settings.api.port,
+            log_level="warning",
         )
+        server = uvicorn.Server(config)
+        # Disable signal handlers so uvicorn can serve from a worker thread
+        server.install_signal_handlers = lambda: None
+        api_thread = Thread(target=server.run, daemon=True)
         api_thread.start()
         logger.info("API server started on %s:%d", settings.api.host, settings.api.port)
 
