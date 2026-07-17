@@ -206,10 +206,10 @@ class Pipeline:
                 time.sleep(sleep_time)
 
     def _process_training(self, frame):
-        """Training mode: only capture and upload labeled frames."""
+        """Training mode: upload only when auto-capture has detection boxes."""
         self._zone_detections = []
-        self._yolo_detections = []
-        self.training.maybe_auto_capture(frame)
+        # Prefer current YOLO detections as box proposals for auto-capture
+        self.training.maybe_auto_capture(frame, detections=self._yolo_detections)
 
     def _process_object_watch(self, frame, frame_count):
         """Detect selected YOLO/COCO classes and optionally notify."""

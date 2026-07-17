@@ -58,6 +58,9 @@
     .class-item { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 0.85rem; }
     .class-item input { width: auto; }
     .hint { font-size: 0.75rem; color: var(--muted); margin: 6px 0 0; }
+    .annotate-wrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; margin-top: 10px; }
+    .annotate-wrap canvas { display: block; width: 100%; cursor: crosshair; }
+    .box-list { font-size: 0.8rem; color: var(--muted); margin-top: 8px; max-height: 80px; overflow-y: auto; }
   </style>
 </head>
 <body>
@@ -164,24 +167,35 @@
 
       <div id="tab-training" class="tab-content">
         <div class="panel">
-          <h2>Modo entrenamiento</h2>
-          <p class="hint">Captura imágenes y las envía por POST al destino. No se guardan en la RPi.</p>
+          <h2>Dataset YOLO</h2>
+          <p class="hint">Cada muestra = imagen + bounding box + label. Se guarda en formato Ultralytics (images/ + labels/ + data.yaml). No se almacena en la RPi.</p>
           <div class="row">
             <button onclick="setMode('training')">Activar Training</button>
-            <button class="secondary" onclick="setMode('inference')">Modo Inferencia</button>
+            <button class="secondary" onclick="setMode('inference')">Inferencia</button>
           </div>
           <label>URL destino</label>
           <input id="trainUrl" type="text">
-          <label>Label actual</label>
-          <input id="trainLabel" type="text" placeholder="ej: stitch, persona, caja">
+          <label>Clase / label</label>
+          <input id="trainLabel" type="text" placeholder="ej: Cony, stitch, caja">
           <div class="toggle">
             <input id="autoCapture" type="checkbox">
-            <label style="margin:0">Auto-captura</label>
+            <label style="margin:0">Auto-captura (solo si hay detecciones YOLO)</label>
           </div>
           <label>Intervalo auto (seg)</label>
           <input id="autoInterval" type="number" min="0.5" step="0.5">
-          <button onclick="saveTraining()">Guardar config training</button>
-          <button class="danger" onclick="captureNow()">Capturar ahora</button>
+          <button onclick="saveTraining()">Guardar config</button>
+
+          <h2 style="margin-top:16px">Anotar muestra</h2>
+          <p class="hint">1) Cargar frame → 2) Arrastrá un recuadro sobre el objeto → 3) Guardar muestra YOLO</p>
+          <div class="row">
+            <button class="secondary" type="button" onclick="loadAnnotateFrame()">Cargar frame</button>
+            <button class="secondary" type="button" onclick="clearBoxes()">Borrar boxes</button>
+          </div>
+          <div class="annotate-wrap">
+            <canvas id="annotateCanvas" width="640" height="360"></canvas>
+          </div>
+          <div class="box-list" id="boxList">Sin boxes. Dibujá sobre la imagen.</div>
+          <button class="danger" onclick="saveYoloSample()">Guardar muestra YOLO</button>
           <div id="trainStats" style="margin-top:12px;font-size:0.85rem;color:var(--muted)"></div>
         </div>
       </div>
@@ -195,12 +209,150 @@
     let allClasses = [];
     let selectedIds = new Set();
 
+    // Annotation state (image pixel coords)
+    let annImg = null;
+    let annNaturalW = 0;
+    let annNaturalH = 0;
+    let annBoxes = [];
+    let annB64 = null;
+    let drawing = false;
+    let startPt = null;
+
     function toast(msg, ok=true) {
       const t = $('toast');
       t.textContent = msg;
       t.style.borderColor = ok ? 'var(--ok)' : 'var(--err)';
       t.classList.add('show');
       setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    function canvasScale() {
+      const c = $('annotateCanvas');
+      return { sx: annNaturalW / c.clientWidth, sy: annNaturalH / c.clientHeight };
+    }
+
+    function canvasToImage(x, y) {
+      const { sx, sy } = canvasScale();
+      return { x: x * sx, y: y * sy };
+    }
+
+    function redrawCanvas() {
+      const c = $('annotateCanvas');
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, c.width, c.height);
+      if (annImg) ctx.drawImage(annImg, 0, 0, c.width, c.height);
+      const { sx, sy } = canvasScale();
+      ctx.strokeStyle = '#f5a623';
+      ctx.lineWidth = 2;
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#f5a623';
+      annBoxes.forEach((b, i) => {
+        const x = b.x1 / sx, y = b.y1 / sy, w = (b.x2 - b.x1) / sx, h = (b.y2 - b.y1) / sy;
+        ctx.strokeRect(x, y, w, h);
+        ctx.fillText(`#${i+1}`, x + 4, y + 14);
+      });
+      $('boxList').textContent = annBoxes.length
+        ? annBoxes.map((b,i) => `#${i+1}: [${Math.round(b.x1)},${Math.round(b.y1)}]→[${Math.round(b.x2)},${Math.round(b.y2)}]`).join(' | ')
+        : 'Sin boxes. Dibujá sobre la imagen.';
+    }
+
+    function setupAnnotateCanvas() {
+      const c = $('annotateCanvas');
+      c.onmousedown = (e) => {
+        if (!annImg) return;
+        const r = c.getBoundingClientRect();
+        const p = canvasToImage(e.clientX - r.left, e.clientY - r.top);
+        drawing = true;
+        startPt = p;
+      };
+      c.onmousemove = (e) => {
+        if (!drawing || !startPt) return;
+        const r = c.getBoundingClientRect();
+        const p = canvasToImage(e.clientX - r.left, e.clientY - r.top);
+        redrawCanvas();
+        const ctx = c.getContext('2d');
+        const { sx, sy } = canvasScale();
+        ctx.strokeStyle = '#4caf50';
+        ctx.strokeRect(startPt.x / sx, startPt.y / sy, (p.x - startPt.x) / sx, (p.y - startPt.y) / sy);
+      };
+      c.onmouseup = (e) => {
+        if (!drawing || !startPt) return;
+        const r = c.getBoundingClientRect();
+        const p = canvasToImage(e.clientX - r.left, e.clientY - r.top);
+        drawing = false;
+        const x1 = Math.min(startPt.x, p.x), y1 = Math.min(startPt.y, p.y);
+        const x2 = Math.max(startPt.x, p.x), y2 = Math.max(startPt.y, p.y);
+        startPt = null;
+        if (Math.abs(x2 - x1) < 8 || Math.abs(y2 - y1) < 8) { redrawCanvas(); return; }
+        annBoxes.push({
+          x1: Math.max(0, x1), y1: Math.max(0, y1),
+          x2: Math.min(annNaturalW, x2), y2: Math.min(annNaturalH, y2),
+        });
+        redrawCanvas();
+      };
+      c.onmouseleave = () => { if (drawing) { drawing = false; startPt = null; redrawCanvas(); } };
+    }
+
+    async function loadAnnotateFrame() {
+      try {
+        const r = await fetch('/api/training/snapshot?' + Date.now());
+        if (!r.ok) throw new Error(await r.text());
+        const blob = await r.blob();
+        const buf = await blob.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        annB64 = btoa(binary);
+
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+        annImg = img;
+        annNaturalW = img.naturalWidth;
+        annNaturalH = img.naturalHeight;
+        annBoxes = [];
+        const c = $('annotateCanvas');
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        redrawCanvas();
+        toast(`Frame ${annNaturalW}x${annNaturalH} listo para anotar`);
+      } catch (e) {
+        toast('Error cargando frame: ' + e.message, false);
+      }
+    }
+
+    function clearBoxes() {
+      annBoxes = [];
+      redrawCanvas();
+    }
+
+    async function saveYoloSample() {
+      const label = $('trainLabel').value.trim();
+      if (!label) { toast('Ingresá un label/clase', false); return; }
+      if (!annB64 || !annBoxes.length) { toast('Cargá un frame y dibujá al menos un box', false); return; }
+      try {
+        const r = await fetch('/api/training/capture', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            label,
+            image_b64: annB64,
+            boxes: annBoxes.map(b => ({
+              x1: Math.round(b.x1), y1: Math.round(b.y1),
+              x2: Math.round(b.x2), y2: Math.round(b.y2),
+            })),
+          }),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const d = await r.json();
+        toast(`YOLO OK: class_id=${d.yolo?.class_id} boxes=${d.yolo?.boxes}`);
+        annBoxes = [];
+        redrawCanvas();
+        updateTrainStats();
+        await loadAnnotateFrame();
+      } catch (e) {
+        toast('Error: ' + e.message, false);
+      }
     }
 
     document.querySelectorAll('.tab').forEach(tab => {
@@ -375,16 +527,7 @@
     }
 
     async function captureNow() {
-      const label = $('trainLabel').value.trim();
-      if (!label) { toast('Ingresa un label primero', false); return; }
-      const r = await fetch('/api/training/capture', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ label }),
-      });
-      if (!r.ok) { toast('Error capturando: ' + (await r.text()), false); return; }
-      toast('Imagen enviada: ' + label);
-      updateTrainStats();
+      toast('Usá "Guardar muestra YOLO" con bounding box', false);
     }
 
     async function updateMetrics() {
@@ -412,6 +555,7 @@
     }
 
     loadClasses().then(loadConfig);
+    setupAnnotateCanvas();
     updateMetrics();
     updateTrainStats();
     setInterval(updateMetrics, 2000);

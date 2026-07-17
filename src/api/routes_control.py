@@ -26,6 +26,10 @@ class ConfigPatch(BaseModel):
 
 class TrainingCaptureRequest(BaseModel):
     label: str = Field(..., min_length=1, max_length=80)
+    # Pixel boxes: [{x1,y1,x2,y2}, ...] — required for YOLO detection training
+    boxes: list[dict[str, float]] = Field(..., min_length=1)
+    # Optional JPEG base64 (without data: prefix). If omitted, uses live camera frame.
+    image_b64: str | None = None
 
 
 def create_control_router(pipeline=None, camera=None, training_uploader=None) -> APIRouter:
@@ -65,15 +69,55 @@ def create_control_router(pipeline=None, camera=None, training_uploader=None) ->
 
     @router.post("/training/capture")
     async def training_capture(req: TrainingCaptureRequest):
-        if not camera or camera.frame is None:
-            raise HTTPException(503, "No frame available")
         if not training_uploader:
             raise HTTPException(503, "Training uploader not initialized")
+        if not req.boxes:
+            raise HTTPException(400, "At least one bounding box is required")
 
-        ok = training_uploader.upload_frame(camera.frame.copy(), req.label, source="manual")
-        if not ok:
+        for box in req.boxes:
+            if not all(k in box for k in ("x1", "y1", "x2", "y2")):
+                raise HTTPException(400, "Each box needs x1,y1,x2,y2")
+
+        if req.image_b64:
+            import base64
+            try:
+                raw = base64.b64decode(req.image_b64)
+                arr = np.frombuffer(raw, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            except Exception as e:
+                raise HTTPException(400, f"Invalid image_b64: {e}") from e
+            if frame is None:
+                raise HTTPException(400, "Could not decode image_b64")
+        else:
+            if not camera or camera.frame is None:
+                raise HTTPException(503, "No frame available")
+            frame = camera.frame.copy()
+
+        result = training_uploader.upload_frame(
+            frame,
+            req.label,
+            boxes=req.boxes,
+            source="manual",
+        )
+        if not result:
             raise HTTPException(502, "Upload to destination failed")
-        return {"status": "ok", "label": req.label}
+        return {"status": "ok", "label": req.label, "yolo": result}
+
+    @router.get("/training/snapshot")
+    async def training_snapshot():
+        """Raw JPEG for annotation UI (no overlays)."""
+        if not camera or camera.frame is None:
+            raise HTTPException(503, "No frame available")
+        frame = camera.frame.copy()
+        h, w = frame.shape[:2]
+        _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        from fastapi.responses import Response
+
+        return Response(
+            content=jpeg.tobytes(),
+            media_type="image/jpeg",
+            headers={"X-Image-Width": str(w), "X-Image-Height": str(h)},
+        )
 
     @router.post("/training/mode/{mode}")
     async def set_training_mode(mode: str):
