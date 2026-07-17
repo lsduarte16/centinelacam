@@ -19,6 +19,8 @@ dependencies = [
     "python-multipart>=0.0.9",
     "schedule>=1.2.0",
     "rclone-python>=0.1.5",
+    "psutil>=5.9.0",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

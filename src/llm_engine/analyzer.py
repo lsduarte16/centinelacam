@@ -8,6 +8,7 @@ import httpx
 
 from src.config import settings
 from src.gate_logic.events import GateEvent, Severity
+from src.runtime.store import runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +20,13 @@ class LLMAnalyzer:
         self.model = settings.llm.model
         self.base_url = settings.llm.base_url
         self.timeout = settings.llm.timeout
-        self.system_prompt = settings.llm.system_prompt
         self._client = httpx.Client(timeout=self.timeout)
         self._event_buffer: list[dict] = []
         self._buffer_size = 10
+
+    @property
+    def system_prompt(self) -> str:
+        return runtime_config.data.mission.prompt or settings.llm.system_prompt
 
     async def analyze_event(self, event: GateEvent) -> dict | None:
         """Send event to LLM for contextual analysis."""

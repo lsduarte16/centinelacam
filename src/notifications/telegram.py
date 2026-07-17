@@ -10,6 +10,7 @@ import httpx
 import numpy as np
 
 from src.config import settings
+from src.runtime.store import runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +19,24 @@ class TelegramNotifier:
     """Sends event notifications to Telegram with optional snapshot."""
 
     def __init__(self):
-        self.enabled = settings.telegram.enabled
         self.bot_token = settings.telegram.bot_token
         self.chat_id = settings.telegram.chat_id
-        self.send_snapshot = settings.telegram.send_snapshot
-        self.cooldown = settings.telegram.cooldown
         self._base_url = f"https://api.telegram.org/bot{self.bot_token}"
         self._client = httpx.Client(timeout=15)
         self._last_sent: dict[str, float] = {}
         self._camera = None
+
+    @property
+    def enabled(self) -> bool:
+        return runtime_config.telegram_enabled()
+
+    @property
+    def send_snapshot(self) -> bool:
+        return runtime_config.data.telegram.send_snapshot
+
+    @property
+    def cooldown(self) -> int:
+        return runtime_config.data.telegram.cooldown
 
     def set_camera(self, camera):
         """Set camera reference for snapshot capture."""

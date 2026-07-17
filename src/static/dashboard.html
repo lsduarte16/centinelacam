@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CentinelaCam Control</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --accent: #f5a623;
+      --text: #e8ecf1;
+      --muted: #8899aa;
+      --ok: #4caf50;
+      --err: #f44336;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; }
+    header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    h1 { margin: 0; font-size: 1.4rem; color: var(--accent); }
+    .subtitle { color: var(--muted); font-size: 0.9rem; }
+    .layout { display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 16px; min-height: calc(100vh - 64px); }
+    @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+    .panel h2 { margin: 0 0 12px; font-size: 1rem; color: var(--accent); }
+    .video-box { background: #000; border-radius: 8px; overflow: hidden; }
+    .video-box img { width: 100%; display: block; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin: 8px 0 4px; }
+    input, select, textarea, button {
+      width: 100%; padding: 8px 10px; border-radius: 6px;
+      border: 1px solid var(--border); background: #0f1419; color: var(--text);
+    }
+    textarea { min-height: 80px; resize: vertical; font-family: inherit; }
+    button { cursor: pointer; background: var(--accent); color: #111; font-weight: 600; border: none; margin-top: 8px; }
+    button.secondary { background: #2d3a4f; color: var(--text); }
+    button.danger { background: var(--err); color: #fff; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .metric { background: #0f1419; padding: 10px; border-radius: 8px; text-align: center; }
+    .metric .val { font-size: 1.4rem; font-weight: bold; color: var(--accent); }
+    .metric .lbl { font-size: 0.75rem; color: var(--muted); }
+    .toggle { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+    .toggle input { width: auto; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    .tab { flex: 1; padding: 8px; text-align: center; border-radius: 6px; cursor: pointer; background: #0f1419; border: 1px solid var(--border); font-size: 0.85rem; }
+    .tab.active { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .status-pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; }
+    .status-pill.on { background: #1b3d1b; color: var(--ok); }
+    .status-pill.off { background: #3d1b1b; color: var(--err); }
+    .toast { position: fixed; bottom: 20px; right: 20px; background: var(--panel); border: 1px solid var(--border); padding: 12px 20px; border-radius: 8px; display: none; z-index: 99; }
+    .toast.show { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>CentinelaCam</h1>
+      <div class="subtitle" id="nodeInfo">Cargando...</div>
+    </div>
+    <div>
+      <span class="status-pill" id="modePill">—</span>
+      <span class="status-pill" id="tgPill">TG</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div>
+      <div class="video-box">
+        <img src="/video" alt="Live">
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <h2>Rendimiento</h2>
+        <div class="metrics" id="metricsGrid"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="tabs">
+        <div class="tab active" data-tab="mission">Misión</div>
+        <div class="tab" data-tab="processing">Proceso</div>
+        <div class="tab" data-tab="training">Training</div>
+      </div>
+
+      <div id="tab-mission" class="tab-content active">
+        <div class="panel">
+          <h2>Misión y Prompt</h2>
+          <label>Nombre misión</label>
+          <input id="missionName" type="text">
+          <label>Descripción</label>
+          <input id="missionDesc" type="text">
+          <label>System prompt (LLM)</label>
+          <textarea id="missionPrompt"></textarea>
+          <button onclick="saveMission()">Guardar misión</button>
+        </div>
+      </div>
+
+      <div id="tab-processing" class="tab-content">
+        <div class="panel">
+          <h2>Procesamiento</h2>
+          <label>FPS</label>
+          <input id="fps" type="number" min="1" max="30">
+          <label>Skip frames</label>
+          <input id="skipFrames" type="number" min="1" max="10">
+          <div class="toggle">
+            <input id="telegramEnabled" type="checkbox">
+            <label style="margin:0">Notificaciones Telegram</label>
+          </div>
+          <label>Cooldown Telegram (seg)</label>
+          <input id="tgCooldown" type="number" min="5" max="300">
+          <h2 style="margin-top:16px">Zonas (zone_violation)</h2>
+          <label>Paper ROI [x1,y1,x2,y2]</label>
+          <input id="paperRoi" type="text" placeholder="130,60,950,570">
+          <label>Safe zone [x1,y1,x2,y2]</label>
+          <input id="safeZone" type="text" placeholder="340,180,740,500">
+          <label>Min object area (px)</label>
+          <input id="minArea" type="number" min="100">
+          <button onclick="saveProcessing()">Guardar procesamiento</button>
+        </div>
+      </div>
+
+      <div id="tab-training" class="tab-content">
+        <div class="panel">
+          <h2>Modo entrenamiento</h2>
+          <p style="font-size:0.85rem;color:var(--muted)">Captura imágenes y las envía por POST al destino. No se guardan en la RPi.</p>
+          <div class="row">
+            <button onclick="setMode('training')">Activar Training</button>
+            <button class="secondary" onclick="setMode('inference')">Modo Inferencia</button>
+          </div>
+          <label>URL destino</label>
+          <input id="trainUrl" type="text">
+          <label>Label actual</label>
+          <input id="trainLabel" type="text" placeholder="ej: stitch, persona, caja">
+          <div class="toggle">
+            <input id="autoCapture" type="checkbox">
+            <label style="margin:0">Auto-captura</label>
+          </div>
+          <label>Intervalo auto (seg)</label>
+          <input id="autoInterval" type="number" min="0.5" step="0.5">
+          <button onclick="saveTraining()">Guardar config training</button>
+          <button class="danger" onclick="captureNow()">Capturar ahora</button>
+          <div id="trainStats" style="margin-top:12px;font-size:0.85rem;color:var(--muted)"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    function toast(msg, ok=true) {
+      const t = $('toast');
+      t.textContent = msg;
+      t.style.borderColor = ok ? 'var(--ok)' : 'var(--err)';
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        $('tab-' + tab.dataset.tab).classList.add('active');
+      });
+    });
+
+    function parseZone(s) {
+      return s.split(',').map(v => parseInt(v.trim(), 10));
+    }
+
+    function fmtZone(arr) {
+      return (arr || []).join(',');
+    }
+
+    async function loadConfig() {
+      const r = await fetch('/api/config');
+      const c = await r.json();
+      $('missionName').value = c.mission?.name || '';
+      $('missionDesc').value = c.mission?.description || '';
+      $('missionPrompt').value = c.mission?.prompt || '';
+      $('fps').value = c.processing?.fps || 10;
+      $('skipFrames').value = c.processing?.skip_frames || 2;
+      $('telegramEnabled').checked = c.telegram?.enabled ?? true;
+      $('tgCooldown').value = c.telegram?.cooldown || 30;
+      $('paperRoi').value = fmtZone(c.zones?.paper_roi);
+      $('safeZone').value = fmtZone(c.zones?.safe_zone);
+      $('minArea').value = c.detector?.min_object_area || 1200;
+      $('trainUrl').value = c.training?.destination_url || '';
+      $('trainLabel').value = c.training?.current_label || '';
+      $('autoCapture').checked = c.training?.auto_capture || false;
+      $('autoInterval').value = c.training?.auto_capture_interval_sec || 2;
+      $('nodeInfo').textContent = `${c.mission?.description || '—'} | ${c.processing?.use_case || '—'}`;
+      updatePills(c);
+    }
+
+    function updatePills(c) {
+      const mode = c.mission?.mode || 'inference';
+      $('modePill').textContent = mode === 'training' ? 'TRAINING' : 'INFERENCE';
+      $('modePill').className = 'status-pill ' + (mode === 'training' ? 'on' : 'off');
+      $('tgPill').textContent = c.telegram?.enabled ? 'TG ON' : 'TG OFF';
+      $('tgPill').className = 'status-pill ' + (c.telegram?.enabled ? 'on' : 'off');
+    }
+
+    async function patchConfig(body) {
+      const r = await fetch('/api/config', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    }
+
+    async function saveMission() {
+      try {
+        await patchConfig({
+          mission: {
+            name: $('missionName').value,
+            description: $('missionDesc').value,
+            prompt: $('missionPrompt').value,
+          }
+        });
+        toast('Misión guardada');
+        loadConfig();
+      } catch(e) { toast('Error: ' + e.message, false); }
+    }
+
+    async function saveProcessing() {
+      try {
+        await patchConfig({
+          processing: { fps: +$('fps').value, skip_frames: +$('skipFrames').value },
+          telegram: { enabled: $('telegramEnabled').checked, cooldown: +$('tgCooldown').value },
+          zones: {
+            paper_roi: parseZone($('paperRoi').value),
+            safe_zone: parseZone($('safeZone').value),
+          },
+          detector: { min_object_area: +$('minArea').value },
+        });
+        toast('Procesamiento guardado (aplica sin redeploy)');
+        loadConfig();
+      } catch(e) { toast('Error: ' + e.message, false); }
+    }
+
+    async function saveTraining() {
+      try {
+        await patchConfig({
+          training: {
+            destination_url: $('trainUrl').value,
+            current_label: $('trainLabel').value,
+            auto_capture: $('autoCapture').checked,
+            auto_capture_interval_sec: +$('autoInterval').value,
+          }
+        });
+        toast('Training config guardada');
+        loadConfig();
+      } catch(e) { toast('Error: ' + e.message, false); }
+    }
+
+    async function setMode(mode) {
+      const r = await fetch(`/api/training/mode/${mode}`, { method: 'POST' });
+      if (!r.ok) { toast('Error cambiando modo', false); return; }
+      toast('Modo: ' + mode);
+      loadConfig();
+    }
+
+    async function captureNow() {
+      const label = $('trainLabel').value.trim();
+      if (!label) { toast('Ingresa un label primero', false); return; }
+      const r = await fetch('/api/training/capture', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ label }),
+      });
+      if (!r.ok) { toast('Error capturando: ' + (await r.text()), false); return; }
+      toast('Imagen enviada: ' + label);
+      updateTrainStats();
+    }
+
+    async function updateMetrics() {
+      try {
+        const r = await fetch('/api/metrics');
+        const m = await r.json();
+        $('metricsGrid').innerHTML = `
+          <div class="metric"><div class="val">${m.cpu_percent}%</div><div class="lbl">CPU</div></div>
+          <div class="metric"><div class="val">${m.memory_percent}%</div><div class="lbl">RAM</div></div>
+          <div class="metric"><div class="val">${m.pipeline_fps}</div><div class="lbl">FPS pipeline</div></div>
+          <div class="metric"><div class="val">${m.avg_process_ms}ms</div><div class="lbl">Proc/frame</div></div>
+          <div class="metric"><div class="val">${m.memory_used_mb}</div><div class="lbl">RAM usada MB</div></div>
+          <div class="metric"><div class="val">${m.frames_processed}</div><div class="lbl">Frames total</div></div>
+        `;
+      } catch(e) {}
+    }
+
+    async function updateTrainStats() {
+      try {
+        const r = await fetch('/api/training/status');
+        const s = await r.json();
+        $('trainStats').textContent =
+          `Uploads OK: ${s.uploads_ok} | Fallos: ${s.uploads_fail} | Modo: ${s.mode}`;
+      } catch(e) {}
+    }
+
+    loadConfig();
+    updateMetrics();
+    updateTrainStats();
+    setInterval(updateMetrics, 2000);
+    setInterval(updateTrainStats, 5000);
+    setInterval(loadConfig, 10000);
+  </script>
+</body>
+</html>

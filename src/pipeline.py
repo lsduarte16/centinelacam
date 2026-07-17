@@ -19,20 +19,22 @@ from src.detector.yolo_detector import YOLODetector
 from src.gate_logic.controller import GateController
 from src.gate_logic.events import EventType, GateEvent, Severity
 from src.llm_engine.analyzer import LLMAnalyzer
+from src.metrics.collector import metrics_collector
 from src.notifications.telegram import TelegramNotifier
+from src.runtime.store import runtime_config
 from src.storage.database import EventDatabase
 from src.storage.sync import CloudSync
+from src.training.uploader import TrainingUploader
 
 logger = logging.getLogger(__name__)
 
 
 class Pipeline:
-    """Main application pipeline driven by the active use case."""
+    """Main application pipeline driven by runtime config."""
 
     def __init__(self):
         self.use_case = settings.use_case
         self.uc_config = settings.active_use_case
-
         self.camera = CameraStream()
         self.detector = YOLODetector()
         self.gate = GateController()
@@ -40,34 +42,29 @@ class Pipeline:
         self.db = EventDatabase()
         self.cloud = CloudSync()
         self.telegram = TelegramNotifier()
+        self.training = TrainingUploader()
         self._running = False
         self._last_violation_time = 0.0
-        self._violation_cooldown = 10.0  # seconds between notifications
-        self._zone_detections = []  # shared with video overlay
+        self._zone_detections: list = []
 
     def initialize(self):
-        """Initialize all components based on active use case."""
         Path(settings.storage.local_path).mkdir(parents=True, exist_ok=True)
         Path(settings.storage.local_path, "logs").mkdir(parents=True, exist_ok=True)
-        Path(settings.storage.local_path, "snapshots").mkdir(parents=True, exist_ok=True)
 
         self._setup_logging()
+        runtime_config.get()  # ensure file exists
 
         logger.info(
-            "Initializing CentinelaCam v0.1.0 | node=%s | use_case=%s",
+            "Initializing CentinelaCam v0.2.0 | node=%s | use_case=%s",
             settings.node.id,
             self.use_case,
         )
-        logger.info("Use case: %s", self.uc_config.description)
 
         self.db.initialize()
-
-        # Configure detector with use-case specific classes and resolution
         self.detector.classes = self.uc_config.classes
         self.detector.load()
         self.detector.warmup()
 
-        # Gate controller only for gate_control use case
         if self.use_case == "gate_control":
             if self.uc_config.gpio_pin:
                 self.gate.gpio_pin = self.uc_config.gpio_pin
@@ -78,31 +75,30 @@ class Pipeline:
             self.gate.initialize()
             self.gate.on_event(self._on_gate_event)
 
-        # Telegram notifications
         self.telegram.set_camera(self.camera)
         if self.telegram.health_check():
             logger.info("Telegram bot connected")
         elif settings.telegram.enabled:
             logger.warning("Telegram bot token invalid or not configured")
 
-        # LLM
         if self.llm.health_check():
             logger.info("Ollama LLM available: %s", settings.llm.model)
         else:
             logger.warning("Ollama not reachable - LLM analysis disabled")
 
         self.cloud.start_periodic()
+        rc = runtime_config.data
         logger.info(
-            "All components initialized | fps=%d skip=%d imgsz=%d",
-            self.uc_config.fps,
-            self.uc_config.skip_frames,
-            settings.detector.imgsz,
+            "Ready | mode=%s fps=%d skip=%d telegram=%s",
+            rc.mission.mode,
+            rc.processing.fps,
+            rc.processing.skip_frames,
+            rc.telegram.enabled,
         )
 
     def _setup_logging(self):
         log_file = Path(settings.logging.file)
         log_file.parent.mkdir(parents=True, exist_ok=True)
-
         logging.basicConfig(
             level=getattr(logging, settings.logging.level),
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -117,29 +113,21 @@ class Pipeline:
         )
 
     def _on_gate_event(self, event):
-        """Handle gate events - store, analyze, notify."""
         self.db.insert_event(event)
-
-        # Notify via Telegram for configured event types
         if event.event_type.value in self.uc_config.events:
             self.telegram.notify(
                 event_type=event.event_type.value,
                 message=event.description,
                 frame=self.camera.frame.copy() if self.camera.frame is not None else None,
             )
-
-        # LLM contextual analysis
         analysis = self.llm.analyze_event_sync(event)
         if analysis:
             logger.info("LLM Analysis: %s", analysis)
 
     def run(self):
-        """Start the main processing loop."""
         self._running = True
-
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-
         self.camera.start()
 
         api_app = create_app(
@@ -148,6 +136,7 @@ class Pipeline:
             camera=self.camera,
             detector=self.detector,
             pipeline=self,
+            training_uploader=self.training,
         )
         api_thread = Thread(
             target=uvicorn.run,
@@ -157,7 +146,6 @@ class Pipeline:
         )
         api_thread.start()
         logger.info("API server started on %s:%d", settings.api.host, settings.api.port)
-        logger.info("Processing pipeline started - waiting for frames...")
 
         try:
             self._process_loop()
@@ -167,60 +155,64 @@ class Pipeline:
             self.shutdown()
 
     def _process_loop(self):
-        """Main frame processing loop with adaptive FPS."""
         frame_count = 0
-        skip_frames = self.uc_config.skip_frames
-        target_fps = self.uc_config.fps
-        frame_interval = 1.0 / target_fps
-
         for frame in self.camera.frames():
             if not self._running:
                 break
+
+            rc = runtime_config.data
+            skip_frames = rc.processing.skip_frames
+            target_fps = rc.processing.fps
+            frame_interval = 1.0 / max(target_fps, 1)
 
             frame_count += 1
             if frame_count % skip_frames != 0:
                 continue
 
             start = time.time()
+            use_case = runtime_config.effective_use_case()
 
-            if self.use_case == "gate_control":
+            if runtime_config.is_training_mode():
+                self._process_training(frame)
+            elif use_case == "gate_control":
                 self._process_gate_control(frame, frame_count)
-            elif self.use_case == "people_counter":
+            elif use_case == "people_counter":
                 self._process_people_counter(frame, frame_count)
-            elif self.use_case == "package_counter":
+            elif use_case == "package_counter":
                 self._process_package_counter(frame, frame_count)
-            elif self.use_case == "barcode_reader":
+            elif use_case == "barcode_reader":
                 self._process_barcode(frame, frame_count)
-            elif self.use_case == "sorter_monitor":
+            elif use_case == "sorter_monitor":
                 self._process_sorter(frame, frame_count)
-            elif self.use_case == "zone_violation":
+            elif use_case == "zone_violation":
                 self._process_zone_violation(frame, frame_count)
 
-            elapsed = time.time() - start
-            sleep_time = max(0, frame_interval - elapsed)
+            elapsed_ms = (time.time() - start) * 1000
+            metrics_collector.record_frame(elapsed_ms)
+
+            sleep_time = max(0, frame_interval - (time.time() - start))
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
+    def _process_training(self, frame):
+        """Training mode: only capture and upload labeled frames."""
+        self._zone_detections = []
+        self.training.maybe_auto_capture(frame)
+
     def _process_gate_control(self, frame, frame_count):
-        """Gate control: detect vehicles/persons and control relay."""
         result = self.detector.detect(frame)
         if result.detections:
             self.gate.process_frame(result)
 
     def _process_people_counter(self, frame, frame_count):
-        """People counter: track persons crossing a line."""
         result = self.detector.detect(frame)
         if result.detections:
             events = self.gate.process_frame(result)
             for event in events:
                 if event.event_type.value in self.uc_config.events:
-                    self.telegram.notify(
-                        event_type=event.event_type.value,
-                        message=event.description,
-                    )
+                    self.telegram.notify(event_type=event.event_type.value, message=event.description)
 
     def _process_package_counter(self, frame, frame_count):
-        """Package counter: count objects crossing detection zone."""
         result = self.detector.detect(frame)
         if result.detections:
             events = self.gate.process_frame(result)
@@ -232,20 +224,15 @@ class Pipeline:
                     )
 
     def _process_barcode(self, frame, frame_count):
-        """Barcode reader: scan region for barcodes/QR."""
         try:
             from pyzbar.pyzbar import decode
         except ImportError:
             return
-
         region = self.uc_config.scan_region
         x1, y1, x2, y2 = region
         crop = frame[y1:y2, x1:x2]
-
-        barcodes = decode(crop)
-        for barcode in barcodes:
+        for barcode in decode(crop):
             data = barcode.data.decode("utf-8")
-            logger.info("Barcode read: %s (%s)", data, barcode.type)
             self.telegram.notify(
                 event_type="barcode_read",
                 message=f"Código: `{data}` ({barcode.type})",
@@ -253,7 +240,6 @@ class Pipeline:
             )
 
     def _process_sorter(self, frame, frame_count):
-        """Sorter monitor: detect jams or fallen objects."""
         result = self.detector.detect(frame)
         if result.detections:
             events = self.gate.process_frame(result)
@@ -266,36 +252,28 @@ class Pipeline:
                     )
 
     def _process_zone_violation(self, frame, frame_count):
-        """Zone violation: detect COLORED objects outside safe zone.
-
-        Uses HSV saturation channel to find colored objects (high saturation)
-        while ignoring black pen lines (zero saturation) and white paper.
-        Only searches within the paper_roi to avoid false positives from background.
-        """
-        safe = self.uc_config.zones.safe_zone
+        rc = runtime_config.data
+        safe = rc.zones.safe_zone
         sx1, sy1, sx2, sy2 = safe
-        roi = self.uc_config.zones.paper_roi
+        roi = rc.zones.paper_roi
         rx1, ry1, rx2, ry2 = roi
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         saturation = hsv[:, :, 1]
-
-        # Only look within the paper ROI
         roi_mask = np.zeros(saturation.shape, dtype=np.uint8)
         roi_mask[ry1:ry2, rx1:rx2] = 255
 
-        _, sat_mask = cv2.threshold(saturation, 60, 255, cv2.THRESH_BINARY)
+        thresh = rc.detector.saturation_threshold
+        _, sat_mask = cv2.threshold(saturation, thresh, 255, cv2.THRESH_BINARY)
         sat_mask = cv2.bitwise_and(sat_mask, roi_mask)
 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         sat_mask = cv2.morphologyEx(sat_mask, cv2.MORPH_OPEN, kernel)
         sat_mask = cv2.morphologyEx(sat_mask, cv2.MORPH_CLOSE, kernel)
 
-        contours, _ = cv2.findContours(
-            sat_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-
-        min_area = self.uc_config.min_object_area
+        contours, _ = cv2.findContours(sat_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        min_area = rc.detector.min_object_area
+        cooldown = rc.telegram.cooldown
         now = time.time()
         self._zone_detections = []
 
@@ -303,25 +281,17 @@ class Pipeline:
             area = cv2.contourArea(cnt)
             if area < min_area:
                 continue
-
             x, y, bw, bh = cv2.boundingRect(cnt)
             cx, cy = x + bw // 2, y + bh // 2
             inside = sx1 <= cx <= sx2 and sy1 <= cy <= sy2
-
             self._zone_detections.append((x, y, bw, bh, inside))
 
-            if not inside and (now - self._last_violation_time >= self._violation_cooldown):
+            if not inside and (now - self._last_violation_time >= cooldown):
                 self._last_violation_time = now
-                logger.info(
-                    "ZONE VIOLATION: colored object at (%d,%d) area=%d outside safe zone",
-                    cx, cy, area,
-                )
+                logger.info("ZONE VIOLATION at (%d,%d) area=%d", cx, cy, area)
                 self.telegram.notify(
                     event_type="zone_violation",
-                    message=(
-                        f"Objeto detectado FUERA de la zona segura "
-                        f"(posición: {cx},{cy}, área: {area}px)"
-                    ),
+                    message=f"Objeto FUERA de zona segura (pos: {cx},{cy})",
                     frame=frame,
                 )
                 self.db.insert_event(
@@ -331,7 +301,7 @@ class Pipeline:
                         description="Objeto fuera de zona segura",
                         track_id=0,
                         frame_id=frame_count,
-                        metadata={"cx": cx, "cy": cy, "area": area},
+                        metadata={"cx": cx, "cy": cy, "area": int(area)},
                     )
                 )
 
@@ -340,13 +310,13 @@ class Pipeline:
         self._running = False
 
     def shutdown(self):
-        """Graceful shutdown of all components."""
         logger.info("Shutting down pipeline...")
         self._running = False
         self.camera.stop()
         self.gate.shutdown()
         self.llm.shutdown()
         self.telegram.shutdown()
+        self.training.shutdown()
         self.cloud.stop()
         self.db.cleanup_old_records()
         self.db.close()
